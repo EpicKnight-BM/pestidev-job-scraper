@@ -26,15 +26,54 @@ calls of accumulated history.
 
 The API calls below authenticate with a bearer token. **The token is NOT in this file** — it is supplied in the run instruction that told you to read this file. That split is deliberate: this file is version-controlled, so a token committed here is readable by anyone with repo access (one was, until 2026-08-17, in a public repo — that token has since been rotated and is dead). The routine's stored prompt is not part of the repo, so the live secret lives there instead.
 
-Set it as a shell variable at the start of your run and use it in both calls below:
+Set it with `export` as the FIRST half of each of the two calls below, joined with `&&`:
 
 ```
-export AI_INGEST_TOKEN="<the token given in your run instruction>"
+export AI_INGEST_TOKEN='<the token given in your run instruction>' && <the curl>
 ```
+
+Do NOT run the `export` as a Bash call of its own and expect the token to still be set later. Each
+Bash call gets a fresh shell — the run log shows the shell being reset between calls — so an export
+issued on its own is gone by the time you run the curl, and the curl then sends an empty token and
+gets a 401 you will misread as a dead credential.
 
 It authorizes ONLY this one endpoint. If a call returns 401, STOP immediately and report that the token is invalid — do not try to work around it, and do not attempt any other credential or endpoint. If your run instruction did NOT give you a token, STOP and report that as well: do not guess one, do not go looking for one in the repo or its git history, and do not proceed without it.
 
-**If the classifier refuses this call, do not try more phrasings of the same curl command.** Confirmed 2026-08-20/2026-08-21 across several attempts in this environment: file-sourcing the token, wrapping in `bash -c`, using a `curl -K` config file, and even a dummy token in place of the real one were ALL refused identically by the Claude Code auto-mode permission classifier — while the same endpoint with no `Authorization` header at all was not classifier-blocked. This means the block is not about how the token is supplied or whether it looks like a real secret. A separate run on this same day made the identical authenticated call successfully, so the block is not consistent across runs either — treat it as environment/classifier state outside this file's control, not something a different curl invocation fixes. If Step 1's GET is refused by the classifier, STOP immediately and report it plainly (treat it like the 401/network-failure cases below) rather than spending run time on further variants.
+### Issue both calls in EXACTLY the canonical form — this is the #1 cause of dead runs
+
+**Type each call exactly as written below. One command. Nothing added.**
+
+Why this matters more than it looks: `.claude/settings.json` allowlists `Bash(curl:*)`, but Bash
+permission rules match on literal command PREFIX, and NEITHER call actually starts with `curl` —
+both start with `export`, and the GET is further prefixed by `timeout`. So that allow rule has never
+matched these calls. Every GET and POST this routine has ever made fell through to the Claude Code
+auto-mode permission classifier, which is a non-deterministic judgement on the whole command text.
+That — not "environment state" — is the real source of the run-to-run inconsistency.
+
+Confirmed 2026-08-23 by diffing the run log of a passing run against two failing ones:
+
+- ALLOWED: the export and the curl as ONE command joined with `&&` (a trailing `\` line-continuation
+  is fine — that is still one command). HTTP 200, run completed, 8 rows ingested.
+- BLOCKED, twice, on 2026-08-23 01:10 and 2026-08-23 22:31: the same call split into THREE separate
+  statements on three lines, with an improvised `cd /home/user/pestidev` in the middle. Both runs
+  produced zero output.
+
+That `cd` is pure noise — your cwd is already the repo root, and the fetch writes to an absolute
+path — but every extra statement in the command is more surface for the classifier to refuse.
+**Do not add a `cd`. Do not split the call into separate statements. Do not add anything the
+canonical form does not have.**
+
+**If a call is refused anyway:** compare what you actually ran against the canonical form. If it
+differed in ANY way, reissue it ONCE in exact canonical form. If it already matched exactly, STOP
+and report it plainly (treat it like the 401/network-failure cases below) — do NOT start trying
+variants. Confirmed 2026-08-20/2026-08-21: file-sourcing the token, wrapping in `bash -c`, using a
+config-file flag, and even a dummy token in place of the real one were all refused identically, so
+no rephrasing gets past a genuine refusal.
+
+The durable fix is not in this file and you cannot apply it mid-run: it is adding `Bash(export:*)`
+and `Bash(timeout 40 curl:*)` to the allow list in `.claude/settings.json`, so these two calls stop
+reaching the classifier at all. If you hit a refusal, name that as the recommended action in your
+final report.
 
 **No subagent ever receives this token.** They have no way to submit and no reason to hold a credential. You make the only API calls in this run.
 
@@ -43,9 +82,12 @@ It authorizes ONLY this one endpoint. If a call returns 401, STOP immediately an
 You start every run with NO memory of previous runs. Fetch your accumulated state FIRST:
 
 ```
-timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $AI_INGEST_TOKEN" \
+export AI_INGEST_TOKEN='<the token given in your run instruction>' && timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $AI_INGEST_TOKEN" \
   https://bakan7.netlify.app/.netlify/functions/ai-registry -o registry.json -w "HTTP:%{http_code}\n"
 ```
+
+That is the canonical form: ONE command, no `cd`, no extra statements. Re-read "Issue both calls in
+EXACTLY the canonical form" above before you change a character of it.
 
 The response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and `listingUrls` — the exact set of posting URLs seen on its listing last time. `listingUrls` is what makes Step 2 cheap.
@@ -160,8 +202,12 @@ Only include a label from this list if the posting actually named it, or an obvi
 
 POST everything from this run in ONE call. There is no git, no file to write, no commit — this API call IS your output. If you skip it, the entire run is lost.
 
+Same canonical-form rule as Step 1: ONE command, the export joined on with `&&`, no `cd`, no extra
+statements. This call is the run's only output — a classifier refusal here throws away everything
+the subagents just did.
+
 ```
-curl -sS -X POST -H "Authorization: Bearer $AI_INGEST_TOKEN" \
+export AI_INGEST_TOKEN='<the token given in your run instruction>' && curl -sS -X POST -H "Authorization: Bearer $AI_INGEST_TOKEN" \
   -H "Content-Type: application/json" \
   https://bakan7.netlify.app/.netlify/functions/ai-registry \
   -d '{
