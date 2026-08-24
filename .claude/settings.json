@@ -31,10 +31,16 @@
     "- rotating one never requires touching the other. .mcp.json references it by env-var name",
     "only, so the routine environment must have that variable set; no token is committed here.",
     "",
-    "enableAllProjectMcpServers is true because an unattended run cannot answer the interactive",
-    "'trust this project MCP server?' prompt - without it the connector silently never loads and",
-    "the run falls straight back to curl. enabledMcpjsonServers names 'pestidev' explicitly so the",
-    "trust is scoped to this one server rather than to whatever a future .mcp.json happens to add.",
+    "enabledMcpjsonServers names 'pestidev' and nothing else. The routine does not strictly need it",
+    "- a cloud session loads project-scoped .mcp.json servers without the interactive 'trust this",
+    "project MCP server?' prompt, which only exists in terminal sessions - but it is what keeps a",
+    "local interactive run consistent with the routine, and it scopes trust to this one server.",
+    "",
+    "Deliberately NOT set: enableAllProjectMcpServers. It approves EVERY server in .mcp.json without",
+    "a prompt and overrides the per-server list above, which makes it strictly broader for no gain",
+    "here. This repo is public: with a blanket approval committed, a second entry appearing in",
+    ".mcp.json - a merged PR, a careless edit - would be auto-connected and its tools exposed to an",
+    "unattended run. With only enabledMcpjsonServers, a new entry stays unapproved.",
     "",
     "The two mcp__pestidev__* allow rules are exact tool names, not prefixes - MCP permission rules",
     "match the whole tool name, unlike the Bash prefix matching discussed below. A bare",
@@ -89,7 +95,6 @@
     "only output. The superseded registry-file design pushed to main and failed silently on",
     "every run from 2026-07-17 onward, so not one finding ever reached the DB."
   ],
-  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": ["pestidev"],
   "permissions": {
     "allow": [
