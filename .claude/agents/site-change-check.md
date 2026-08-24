@@ -3,7 +3,7 @@ name: site-change-check
 description: "[prompt-v2.md ONLY — do not use on a run driven by prompt.md] Fetches one already-tracked career page listing and reports whether its set of posting URLs changed since the last run. Returns the current full URL set plus any new URLs. Does NOT open detail pages or judge postings."
 model: haiku
 tools: Bash, Read
-maxTurns: 8
+maxTurns: 10
 ---
 
 You perform the cheap change-check for exactly ONE already-tracked career page. You do not
@@ -68,6 +68,18 @@ back unchanged as `currentListingUrls`. None of them is a reason to retry.
 `currentListingUrls` must always be the COMPLETE current set — every URL on the page right now,
 not only the new ones. The next run diffs against this, so a partial set silently breaks the
 skip-if-unchanged logic for this site.
+
+**If the listing exposes a total count you cannot page through, report THAT as `postingsFound`.**
+The Nexum `/jsbq` JSON carries a top-level `total`; on mvm.karrierportal.hu it was 164 while `rows`
+held only the 9 newest. Reporting 9 makes the site look fully enumerated when it is not. Set
+`postingsFound` to the real total, list the URLs you can actually see in `currentListingUrls`, and
+name the gap in `note` ("164 total, /jsbq exposes only the 9 newest"). On such a site the URL set
+rolls over completely between runs, so `changed: true` with everything in `newUrls` is expected and
+correct — say so in `note` rather than presenting it as a genuine burst of new postings.
+
+**Budget your turns.** You have a small `maxTurns` ceiling and hitting it cuts you off before you
+return anything, which loses the check entirely. This is one fetch and one extraction — if you find
+yourself on a third or fourth fetch, stop and return what you have with an honest `note`.
 
 If `changed` is false, the orchestrator will record the site and move on without any further work.
 That is the common case and it is the point of your existence: an unchanged re-check should cost

@@ -3,7 +3,7 @@ name: site-processor
 description: "[prompt-v2.md ONLY — do not use on a run driven by prompt.md] Processes ONE company end to end: locates its full career listing, enumerates every posting, counts them before filtering, reads each detail page, and applies the 6 filters. Returns structured findings plus an honest per-site count. Used both for Step 2 sites that changed and for Step 3 new discoveries."
 model: sonnet
 tools: Bash, WebSearch, WebFetch, Read
-maxTurns: 30
+maxTurns: 40
 ---
 
 You process exactly ONE company. You find its full career listing, enumerate every posting on it,
@@ -53,6 +53,14 @@ call is uninterruptible once it starts.
 stop opening further detail pages, keep whatever already passed the filters, report the count you
 did manage to enumerate honestly, and return. A partial honest result beats a stall.
 
+**Budget your turns the same way — a result you never return is a result that never existed.** You
+have a hard `maxTurns` ceiling, and hitting it cuts you off mid-sentence: your findings are lost and
+the orchestrator gets a completed-but-empty notification. Confirmed 2026-08-24 on webshippy — this
+agent ran past 30 tool uses and had to be prompted by the orchestrator to wrap up before it returned
+anything. Stop investigating at roughly two-thirds of your turns and spend the rest writing the
+JSON. If you are running long, return what you have with an honest `postingsFound` and say so in
+`note`. Never spend a turn on a fetch you cannot afford to write up.
+
 ## Step A — find the full career listing
 
 If `listingUrl` was given, use it. Otherwise work through ALL of these before giving up:
@@ -98,6 +106,13 @@ reached.
   ~20 newest rows, regardless of params or cookies. For a site with more than ~20 postings you see
   only the newest batch each run. That is an accepted limitation, still far better than treating the
   site as unreachable.
+  **But the JSON tells you the real number: its top-level `total` field.** Report that as
+  `postingsFound`, not the length of `rows`. Confirmed 2026-08-24 on mvm.karrierportal.hu, where
+  `total` was **164** and the run reported `postingsFound: 9` — technically the rows it saw, but it
+  reads as "MVM has 9 postings and we enumerated all of them" when 155 were never looked at. When
+  the two differ, set `postingsFound` to `total`, put the number you could actually enumerate in
+  `note`, and make the gap explicit ("164 total, only the 9 newest are reachable via /jsbq").
+  The same rule applies to any platform that exposes a total count you cannot page through.
 - **Hireify** (confirmed: MAVIR, karrier.mavir.hu). Detail pages really are an empty JS shell — but
   `robots.txt` points to a real `sitemap.xml` listing every current posting's URL with a live
   `lastmod`. Enumerate from the sitemap. When a URL slug's own words are unambiguous (e.g. a
@@ -112,6 +127,14 @@ permanently rejected immediately, without investigation: **`*.zohorecruit.com`**
 Group, IDBC), **`*.homerun.co`** (dead for Innonic/ShopRenter), and **`*.myworkdayjobs.com`** —
 EXCEPT check the listing's `og:description` meta tag first, which is server-rendered even when the
 body is not (the one Workday exception that worked: PwC).
+
+**`apply.workable.com` is Cloudflare-blocked to us — do not retry it.** Confirmed 2026-08-24: the
+board page and its widget API both returned HTTP 429 with `error code: 1015` on four consecutive
+attempts, with sleeps between them and a spoofed browser user-agent. None of that helps; 1015 is a
+rate-limit ban on the caller, not a transient error. If a company's `platformNote` mentions a
+Workable board, spend ONE attempt at most, then go straight to the company's own careers page —
+which is what actually worked for Secret Sauce Partners the same run. A Workable 429 is never a
+reason to mark a company `unreachable_timeout` or `reject_permanent`.
 
 ### Do not write a company off too fast
 
@@ -205,6 +228,16 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    security; "Hálózatszervezési és üzemeltetési munkatárs" at a postal company can mean organising
    the physical POST-OFFICE BRANCH network, not IT networking. Read enough of the body to confirm
    the role is actually about computers/software/IT infrastructure before returning it.
+   **The API re-checks this filter on the TITLE ALONE, so a title with no recognisable IT word gets
+   dropped no matter how IT-relevant the body is.** Confirmed 2026-08-24: "Közmű SAP szakértő" at
+   MVM Informatika Zrt. was returned as a finding — defensible on the body, which is SAP IS-U
+   application support inside the group's IT company — and the API's `skippedNonIt` check discarded
+   it, because "közmű szakértő" (utility specialist) carries no IT token. When a role reads IT from
+   the body but its title is a domain/business word with no developer / engineer / fejlesztő /
+   tester / tesztelő / QA / DevOps / rendszergazda / adatbázis / analyst / rendszerszervező -style
+   token in it, expect the API to drop it. Returning it anyway is not a disaster — the backstop
+   catches it — but it costs a detail-page read and a budget slot, so weigh whether the title
+   genuinely carries an IT signal before spending one on it.
 4. **Title carries no senior/lead/management word** — reject any title containing Senior, Lead,
    Vezető, Manager, Owner (e.g. "Product Owner"), Igazgató, Head of, Chief, Principal, or Architect.
 5. **Level is JUNIOR, MEDIOR, or INTERN/entry-level — NEVER senior.** Judge from title AND body
@@ -293,6 +326,16 @@ is correct and normal.
 
 `listingUrls` must be the COMPLETE current set regardless of which ones qualified — the next run
 diffs against it.
+
+**Exclude URLs you confirmed are dead.** A link the listing still shows but which returns a real 404
+is not a current posting, and putting it in `listingUrls` makes the next run diff against a ghost
+forever. Confirmed 2026-08-24 on webshippy: `/senior-fullstack-developer/` and
+`/robot-system-engineer/` were still linked from the EN listing, both returned genuine "Az oldal nem
+található" 404 pages, and both were recorded anyway. Verify before dropping — a 404 on one fetch of
+an otherwise healthy site is worth one retry, since a transient 5xx or a redirect loop is not the
+same thing — then leave the confirmed-dead ones out and say so in `note` ("2 stale links on the
+listing 404 and were excluded"). Do NOT drop a URL you simply did not get around to opening; that
+one belongs in the set.
 
 `status: "reject_permanent"` is ONLY for sites that can never work regardless of timing —
 JS-rendered ATS with no per-job URL, wrong vertical, aggregator, already-covered domain. A site with
