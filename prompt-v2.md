@@ -22,9 +22,69 @@ Never do a subagent's work inline yourself. If a site needs processing, dispatch
 that is what keeps each site's evaluation in a fresh context instead of drifting after forty tool
 calls of accumulated history.
 
-## Authentication
+## How you reach the API — MCP first, curl only as fallback
 
-The API calls below authenticate with a bearer token. **The token is NOT in this file** — it is supplied in the run instruction that told you to read this file. That split is deliberate: this file is version-controlled, so a token committed here is readable by anyone with repo access (one was, until 2026-08-17, in a public repo — that token has since been rotated and is dead). The routine's stored prompt is not part of the repo, so the live secret lives there instead.
+The registry exposes the **same two operations over two transports**, and they share one
+implementation server-side (`netlify/functions/_ai_registry_core.mjs` in Andrssss/MyWebsite, called
+by both `ai-registry.mjs` for REST and `ai-mcp.mjs` for MCP). Same registry shape, same budget, same
+filter/upsert tail, same rate limit. Nothing about your judgment, your filters or your budget
+arithmetic changes with the transport — only how the request leaves this session.
+
+**Use MCP when it is available. Fall back to curl only when it is not.**
+
+### The MCP tools
+
+| Tool | Replaces | Arguments |
+|---|---|---|
+| `get_registry` | Step 1's GET | none — `{}` |
+| `submit_findings` | Step 4's POST | `{ findings, sitesChecked, rejected }` — the exact same JSON body the POST took |
+
+This repo's `.mcp.json` registers the server under the name **`pestidev`**, so the tools appear as
+`mcp__pestidev__get_registry` and `mcp__pestidev__submit_findings`, and both are pre-approved in
+`.claude/settings.json`. If the connector was registered on the environment under a different name,
+the prefix differs but the tool's own name does not — match on `get_registry` / `submit_findings`
+and use whatever prefix your tool list actually shows.
+
+`get_registry` returns the registry snapshot as JSON text in its result content — the identical
+object the GET wrote to `registry.json`. `submit_findings` returns the identical `{ok, ingested,
+rateLimit, counts}` object the POST returned. Read them exactly as described in Steps 1 and 4.
+
+### Why MCP is preferred
+
+The connector holds the credential and attaches it to the request itself. You never handle a token:
+nothing to `export`, nothing to paste into a command, nothing to leak into the run transcript. The
+curl path needs the token copied out of your run instruction into a shell command on every single
+run, and that has been this routine's most fragile step — see the canonical-form section below for
+the failure history it produced.
+
+### Decide the transport ONCE, at the start of the run
+
+Before Step 1, check whether `get_registry` is in your available tools.
+
+- **Present** → use MCP for BOTH calls. Do not also issue the curl versions; that would double-count
+  against the upload budget. Do not touch `AI_INGEST_TOKEN` at all.
+- **Absent** → the connector is not registered on this environment. Say so once in your final
+  report, then run the whole run on curl exactly as documented below. This is a working fallback,
+  not a failure — do not stop the run over it.
+
+Do not switch transports mid-run. If an MCP tool call fails with a transport-level error (not an
+`isError` result about your payload — those are real API errors and are handled in Step 4), you may
+retry it once, and if it fails again fall back to curl for the rest of the run and report both facts.
+
+An MCP result with `isError: true` is the API rejecting your request, not the transport breaking.
+Its text carries the same `too_many_rows` / `rate_limited` details the REST 413 / 429 responses do —
+handle it with the Step 4 response rules, and never retry it in a loop.
+
+**No subagent ever gets either transport.** The agents in `.claude/agents/` have no MCP tools in
+their frontmatter and no credential, so they structurally cannot reach the registry. You make every
+registry call in this run, on whichever transport you chose above.
+
+## Authentication — for the curl fallback only
+
+Skip this whole section if `get_registry` was present: on MCP you never handle a token, and a run
+instruction that gave you no `AI_INGEST_TOKEN` is then completely fine — do NOT stop over it.
+
+The curl calls below authenticate with a bearer token. **The token is NOT in this file** — it is supplied in the run instruction that told you to read this file. That split is deliberate: this file is version-controlled, so a token committed here is readable by anyone with repo access (one was, until 2026-08-17, in a public repo — that token has since been rotated and is dead). The routine's stored prompt is not part of the repo, so the live secret lives there instead.
 
 Set it with `export` as the FIRST half of each of the two calls below, joined with `&&`:
 
@@ -39,7 +99,9 @@ gets a 401 you will misread as a dead credential.
 
 It authorizes ONLY this one endpoint. If a call returns 401, STOP immediately and report that the token is invalid — do not try to work around it, and do not attempt any other credential or endpoint. If your run instruction did NOT give you a token, STOP and report that as well: do not guess one, do not go looking for one in the repo or its git history, and do not proceed without it.
 
-### Issue both calls in EXACTLY the canonical form — this is the #1 cause of dead runs
+### Issue both curl calls in EXACTLY the canonical form — this is the #1 cause of dead runs
+
+(Fallback path only. On MCP there is no command to get this right or wrong.)
 
 **Type each call exactly as written below. One command. Nothing added.**
 
@@ -70,16 +132,24 @@ variants. Confirmed 2026-08-20/2026-08-21: file-sourcing the token, wrapping in 
 config-file flag, and even a dummy token in place of the real one were all refused identically, so
 no rephrasing gets past a genuine refusal.
 
-The durable fix is not in this file and you cannot apply it mid-run: it is adding `Bash(export:*)`
-and `Bash(timeout 40 curl:*)` to the allow list in `.claude/settings.json`, so these two calls stop
-reaching the classifier at all. If you hit a refusal, name that as the recommended action in your
-final report.
+Two durable fixes exist, and you cannot apply either mid-run. The narrow one is already in place:
+`.claude/settings.json` allowlists `Bash(export:*)` and `Bash(timeout:*)`, which between them cover
+both halves of the compound command above. The real one is the MCP transport — on MCP there is no
+self-composed shell command carrying a credential at all, which is why the top of this file tells
+you to prefer it. If you hit a refusal on curl, first check whether `get_registry` was in your tool
+list and you simply did not use it; if it genuinely was not, name the unregistered `pestidev`
+connector as the recommended action in your final report.
 
 **No subagent ever receives this token.** They have no way to submit and no reason to hold a credential. You make the only API calls in this run.
 
 ## Step 1 — GET your memory AND your upload budget
 
-You start every run with NO memory of previous runs. Fetch your accumulated state FIRST:
+You start every run with NO memory of previous runs. Fetch your accumulated state FIRST.
+
+**On MCP (preferred):** call `get_registry` with no arguments. Nothing else — no token, no shell.
+Its result content is the registry snapshot as JSON text; parse it and read the fields below.
+
+**On the curl fallback only:**
 
 ```
 export AI_INGEST_TOKEN='<the token given in your run instruction>' && timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $AI_INGEST_TOKEN" \
@@ -89,7 +159,7 @@ export AI_INGEST_TOKEN='<the token given in your run instruction>' && timeout 40
 That is the canonical form: ONE command, no `cd`, no extra statements. Re-read "Issue both calls in
 EXACTLY the canonical form" above before you change a character of it.
 
-The response gives you:
+Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and `listingUrls` — the exact set of posting URLs seen on its listing last time. `listingUrls` is what makes Step 2 cheap.
 - `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these.
 - `knownUrls` — job URLs already successfully submitted. Never submit these again.
@@ -198,13 +268,36 @@ other source on the board and gets manually corrected after the fact, which alre
 
 Only include a label from this list if the posting actually named it, or an obvious synonym — "Postgres" → PostgreSQL, "Node" → Node.js. If a posting's `techMentions` has NOTHING on this list (e.g. it only mentioned SharePoint, Power Automate, Fortinet, specific network hardware, or non-technical tools), leave `technologies` empty/omit it entirely rather than writing an unrecognized label. An empty field is correct and normal; a made-up label is not. Never pad the list with things the posting did not mention.
 
-### Assemble and POST
+### Assemble and submit
 
-POST everything from this run in ONE call. There is no git, no file to write, no commit — this API call IS your output. If you skip it, the entire run is lost.
+Submit everything from this run in ONE call. There is no git, no file to write, no commit — this
+call IS your output. If you skip it, the entire run is lost.
 
-Same canonical-form rule as Step 1: ONE command, the export joined on with `&&`, no `cd`, no extra
-statements. This call is the run's only output — a classifier refusal here throws away everything
-the subagents just did.
+**On MCP (preferred):** call `submit_findings` with the payload as its arguments — the same three
+keys, the same shapes, exactly as documented below:
+
+```json
+{
+  "findings": [
+    {"slug":"flexinform","title":"Junior PHP fejlesztő","url":"https://www.flexinform.hu/karrier/junior-php-fejleszto",
+     "company":"Flexinform Kft.","location":"Budapest","experience":"junior","technologies":"PHP, SQL"}
+  ],
+  "sitesChecked": {
+    "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
+     "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
+  },
+  "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+}
+```
+
+Passing structured tool arguments removes the whole class of shell-quoting failures the curl body
+has: no single quotes to balance, no Hungarian accented characters to escape, no malformed-JSON 400
+that silently costs the run. Send it ONCE. A tool call that returned a result has been applied —
+re-sending it double-counts against the upload budget.
+
+**On the curl fallback only.** Same canonical-form rule as Step 1: ONE command, the export joined on
+with `&&`, no `cd`, no extra statements. This call is the run's only output — a refusal here throws
+away everything the subagents just did.
 
 ```
 export AI_INGEST_TOKEN='<the token given in your run instruction>' && curl -sS -X POST -H "Authorization: Bearer $AI_INGEST_TOKEN" \
@@ -238,6 +331,21 @@ All three keys are optional — send only what applies. Send `findings: []` on a
 
 ### What the API can return — handle each of these
 
+The list below is written in REST status codes, but the CONDITIONS are transport-independent — the
+same `_ai_registry_core.mjs` raises them either way. On MCP you get the same information in a
+different wrapper:
+
+- A normal result whose text is `{ok:true, ingested, rateLimit, counts}` is the **200** row.
+- A result with `isError: true` is the API refusing your payload. Its text carries the same details
+  the REST error bodies do: `too_many_rows` (with `max` / `received`) is the **413** row,
+  `rate_limited` (with `limit` / `retryAfterSeconds`) is the **429** row. Handle them exactly as
+  those rows say, and never retry either in a loop.
+- A JSON-RPC error, or a tool call that does not come back at all, is the **network error / 5xx**
+  row — retry once, then fall back to curl per the transport rules at the top of this file.
+- A 401 cannot reach you as a tool result on MCP: the connector's own token is wrong, and the tool
+  call fails at the transport layer. Report the connector as misconfigured rather than reporting a
+  dead `AI_INGEST_TOKEN` — they are different credentials and rotating the wrong one fixes nothing.
+
 - **200** — success. Body has `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` / `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` means a senior TITLE the API's denylist caught; `skippedLocation` means the API's location backstop caught a posting whose `location` text named somewhere other than Budapest unambiguously — if this is non-zero for a posting the agent thought ambiguous, treat it as a signal to write a clearer `location` next time, not as a bug.
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — more than 100 findings in one request; you should never be near this.
@@ -262,7 +370,11 @@ Keep it there; do not duplicate it back into this file.
 
 ## Final output
 
-End with a short plain-text summary. For EVERY site touched this run (re-check or new discovery), state **"found N postings, M IT-relevant, K passed the level filter, submitted J"** — these come straight from each `site-processor`'s `postingsFound` / `itRelevant` / `passedLevel` fields. A site entry with no N is an incomplete check; say so plainly rather than omitting it. A `site-change-check` that returned `changed: false` reports as "unchanged, N URLs on listing, 0 opened".
+Open with one line naming the transport you used: `transport: mcp` or `transport: curl (pestidev
+MCP connector not registered on this environment)`. That one line is how the owner tells a genuine
+API problem apart from a connector that never loaded, so never omit it and never guess it.
+
+Then a short plain-text summary. For EVERY site touched this run (re-check or new discovery), state **"found N postings, M IT-relevant, K passed the level filter, submitted J"** — these come straight from each `site-processor`'s `postingsFound` / `itRelevant` / `passedLevel` fields. A site entry with no N is an incomplete check; say so plainly rather than omitting it. A `site-change-check` that returned `changed: false` reports as "unchanged, N URLs on listing, 0 opened".
 
 Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — the HTTP status, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
 
