@@ -6,9 +6,58 @@ Everything you submit goes STRAIGHT INTO THE LIVE PRODUCTION DATABASE of a real 
 
 The API re-applies its own deterministic checks (IT-title match, senior-TITLE denylist, company blocklist, non-Budapest location) and will silently drop anything that fails them — so if the response shows fewer rows accepted than you sent, that is the safety net working, not a bug. Read the response and report it honestly.
 
-## Authentication
+## How you reach the API — MCP first, curl only as fallback
 
-All API calls below authenticate with a bearer token. **The token is NOT in this file** — it is supplied in the run instruction that told you to read this file. That split is deliberate: this file is version-controlled, so a token committed here is readable by anyone with repo access (one was, until 2026-08-17, in a public repo — that token has since been rotated and is dead). The routine's stored prompt is not part of the repo, so the live secret lives there instead.
+The registry exposes the **same two operations over two transports**, sharing one implementation
+server-side (`netlify/functions/_ai_registry_core.mjs` in Andrssss/MyWebsite, called by both
+`ai-registry.mjs` for REST and `ai-mcp.mjs` for MCP). Same registry shape, same budget, same
+filter/upsert tail, same rate limit. Nothing about your judgment, your filters or your budget
+arithmetic changes with the transport — only how the request leaves this session.
+
+**Use MCP when it is available. Fall back to curl only when it is not.**
+
+| Tool | Replaces | Arguments |
+|---|---|---|
+| `get_registry` | Step 1's GET | none — `{}` |
+| `submit_findings` | Step 4's POST | `{ findings, sitesChecked, rejected }` — the exact same JSON body the POST took |
+
+This repo's `.mcp.json` registers the server under the name **`pestidev`**, so the tools appear as
+`mcp__pestidev__get_registry` and `mcp__pestidev__submit_findings`, and both are pre-approved in
+`.claude/settings.json`. If the connector was registered on the environment under a different name,
+the prefix differs but the tool's own name does not — match on `get_registry` / `submit_findings`
+and use whatever prefix your tool list actually shows.
+
+`get_registry` returns the registry snapshot as JSON text in its result content — the identical
+object the GET wrote to `registry.json`. `submit_findings` returns the identical `{ok, ingested,
+rateLimit, counts}` object the POST returned. Read them exactly as Steps 1 and 4 describe.
+
+**Why MCP is preferred:** the connector holds the credential and attaches it to the request itself.
+You never handle a token — nothing to `export`, nothing to paste into a command, nothing to leak
+into the run transcript. The curl path needs the token copied out of your run instruction into a
+shell command on every single run, and that has been this routine's most fragile step (see the
+2026-08-20/21 note below).
+
+**Decide the transport ONCE, before Step 1.** Check whether `get_registry` is in your available
+tools.
+
+- **Present** → use MCP for BOTH calls. Do not also issue the curl versions; that would double-count
+  against the upload budget. Do not touch `AI_INGEST_TOKEN` at all, and skip the Authentication
+  section below entirely.
+- **Absent** → the connector is not registered on this environment. Say so once in your final
+  report, then run the whole run on curl exactly as documented below. This is a working fallback,
+  not a failure — do not stop the run over it.
+
+Do not switch transports mid-run. If an MCP tool call fails at the transport layer, retry it once;
+if it fails again, fall back to curl for the rest of the run and report both facts. A result with
+`isError: true` is NOT a transport failure — that is the API rejecting your payload, carrying the
+same `too_many_rows` / `rate_limited` details the REST 413 / 429 bodies do. Handle those with the
+Step 4 response rules and never retry them in a loop.
+
+## Authentication — for the curl fallback only
+
+Skip this whole section if `get_registry` was present: on MCP you never handle a token, and a run instruction that gave you no `AI_INGEST_TOKEN` is then completely fine — do NOT stop over it.
+
+The curl calls below authenticate with a bearer token. **The token is NOT in this file** — it is supplied in the run instruction that told you to read this file. That split is deliberate: this file is version-controlled, so a token committed here is readable by anyone with repo access (one was, until 2026-08-17, in a public repo — that token has since been rotated and is dead). The routine's stored prompt is not part of the repo, so the live secret lives there instead.
 
 Set it as a shell variable at the start of your run and use it in both calls below:
 
@@ -20,16 +69,23 @@ It authorizes ONLY this one endpoint. If a call returns 401, STOP immediately an
 
 **If the classifier refuses this call, do not try more phrasings of the same curl command.** Confirmed 2026-08-20/2026-08-21 across several attempts in this environment: file-sourcing the token, wrapping in `bash -c`, using a `curl -K` config file, and even a dummy token in place of the real one were ALL refused identically by the Claude Code auto-mode permission classifier — while the same endpoint with no `Authorization` header at all was not classifier-blocked. This means the block is not about how the token is supplied or whether it looks like a real secret. A separate run on this same day made the identical authenticated call successfully, so the block is not consistent across runs either — treat it as environment/classifier state outside this file's control, not something a different curl invocation fixes. If Step 1's GET is refused by the classifier, STOP immediately and report it plainly (treat it like the 401/network-failure cases below) rather than spending run time on further variants.
 
+This entire failure mode is why the MCP transport exists and why the top of this file tells you to prefer it: on MCP there is no self-composed shell command carrying a credential, so there is nothing here to refuse. Before reporting a refusal, check whether `get_registry` was in your tool list and you simply did not use it. If it genuinely was not, name the unregistered `pestidev` connector as the recommended action in your final report.
+
 ## Step 1 — GET your memory AND your upload budget
 
-You start every run with NO memory of previous runs. Fetch your accumulated state FIRST:
+You start every run with NO memory of previous runs. Fetch your accumulated state FIRST.
+
+**On MCP (preferred):** call `get_registry` with no arguments. Nothing else — no token, no shell.
+Its result content is the registry snapshot as JSON text; parse it and read the fields below.
+
+**On the curl fallback only:**
 
 ```
 timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer $AI_INGEST_TOKEN" \
   https://bakan7.netlify.app/.netlify/functions/ai-registry -o registry.json -w "HTTP:%{http_code}\n"
 ```
 
-The response gives you:
+Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and (once you've checked it at least once under this rule) `listingUrls` — the exact set of posting URLs you saw on its listing last time. `listingUrls` is what makes Step 2 cheap: it's how you tell whether the page changed at all since last visit, without re-reading anything.
 - `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these.
 - `knownUrls` — job URLs you have already successfully submitted. Never submit these again.
@@ -179,7 +235,27 @@ If you genuinely cannot reach the full listing even after trying the sitemap, at
 
 ## Step 4 — SUBMIT via the API (this is the only way your work is saved)
 
-POST everything from this run in ONE call. There is no git, no file to write, no commit — this API call IS your output. If you skip it, the entire run is lost.
+Submit everything from this run in ONE call. There is no git, no file to write, no commit — this call IS your output. If you skip it, the entire run is lost.
+
+**On MCP (preferred):** call `submit_findings` with the payload as its arguments — the same three keys, the same shapes, exactly as the field rules below describe:
+
+```json
+{
+  "findings": [
+    {"slug":"flexinform","title":"Junior PHP fejlesztő","url":"https://www.flexinform.hu/karrier/junior-php-fejleszto",
+     "company":"Flexinform Kft.","location":"Budapest","experience":"junior","technologies":"PHP, SQL"}
+  ],
+  "sitesChecked": {
+    "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
+     "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
+  },
+  "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+}
+```
+
+Passing structured tool arguments removes the whole class of shell-quoting failures the curl body has: no single quotes to balance, no Hungarian accented characters to escape, no malformed-JSON 400 that silently costs the run. Send it ONCE — a tool call that returned a result has been applied, and re-sending it double-counts against the upload budget.
+
+**On the curl fallback only:**
 
 ```
 curl -sS -X POST -H "Authorization: Bearer $AI_INGEST_TOKEN" \
@@ -217,6 +293,13 @@ All three keys are optional — send only what applies. Send `findings: []` on a
 
 ### What the API can return — handle each of these
 
+The list below is written in REST status codes, but the CONDITIONS are transport-independent — the same server-side code raises them either way. On MCP you get the same information in a different wrapper:
+
+- A normal result whose text is `{ok:true, ingested, rateLimit, counts}` is the **200** row.
+- A result with `isError: true` is the API refusing your payload. Its text carries the same details the REST error bodies do: `too_many_rows` (with `max` / `received`) is the **413** row, `rate_limited` (with `limit` / `retryAfterSeconds`) is the **429** row. Handle them exactly as those rows say, and never retry either in a loop.
+- A JSON-RPC error, or a tool call that does not come back at all, is the **network error / 5xx** row — retry once, then fall back to curl per the transport rules at the top of this file.
+- A 401 cannot reach you as a tool result on MCP: it would mean the connector's own token is wrong, and the call fails at the transport layer instead. Report the connector as misconfigured rather than reporting a dead `AI_INGEST_TOKEN` — they are different credentials, and rotating the wrong one fixes nothing.
+
 - **200** — success. Body has `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` / `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` here means a senior TITLE the API's denylist caught; `skippedLocation` means the API's own location backstop caught a posting whose `location` text named somewhere other than Budapest with no ambiguity — if this is non-zero for a posting you thought was ambiguous, treat it as a signal to write a clearer `location` value next time, not as a bug.
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — you sent more than 100 findings in one request; you should never be near this if you followed the budget rule.
@@ -245,11 +328,13 @@ All three keys are optional — send only what applies. Send `findings: []` on a
 
 ## Final output
 
-End with a short plain-text summary: for EVERY site you touched this run (re-check or new discovery),
+Open with one line naming the transport you used: `transport: mcp` or `transport: curl (pestidev MCP connector not registered on this environment)`. That one line is how the owner tells a genuine API problem apart from a connector that never loaded, so never omit it and never guess it.
+
+Then a short plain-text summary: for EVERY site you touched this run (re-check or new discovery),
 state "found N postings, M IT-relevant, K passed the level filter, submitted J" per the mandatory
 count-before-filter rule above — a site entry with no N is an incomplete check, say so plainly rather
 than omitting it. Then: how many known sites you re-checked and their results, how many new companies you
 investigated and their outcomes, the exact list of any NEW findings you submitted (title/url/company/level),
-and the API's response — the HTTP status, how many rows it accepted per source versus how many you sent,
-and `rateLimit.throttled` if non-zero. If the POST failed for any reason, say so explicitly and prominently:
-that means this run saved nothing.
+and the API's response — the HTTP status (or, on MCP, whether the tool result was `ok:true` or `isError`),
+how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
+If the submit failed for any reason, say so explicitly and prominently: that means this run saved nothing.
