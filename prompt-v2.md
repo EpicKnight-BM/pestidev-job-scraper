@@ -239,12 +239,27 @@ With remaining budget:
 1. **Dispatch `company-discovery`** with `knownDomains` (every domain in `sites`),
    `permanentlyRejected`, and how many candidates you want. It rotates across role/platform/sector
    query buckets and de-duplicates by domain before it returns anything.
-2. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
+2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
+   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing twice
+   (2026-08-24 and 2026-08-26); both runs were saved only because the orchestrator noticed and
+   asked again, and a run that accepts the empty result silently loses the whole discovery step.
+   When the agent completes with no `candidates` array, or its reply ends mid-sentence:
+   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent rewrites that file with
+     its full candidate list every time it confirms one, precisely so a cutoff cannot destroy
+     them. It holds a plain JSON array in the same shape as the agent's `candidates` field, and
+     the entries are usable as-is — they have already passed the agent's de-duplication. If the
+     file is missing, treat it as empty and move to the next bullet rather than stopping.
+   - **Then `SendMessage` the agent** telling it to stop searching immediately and return its JSON
+     right now with whatever it already has. Its `maxTurns` budget is per-invocation, so a resumed
+     agent gets room to write up. Use whichever list is longer, the file or the reply.
+   - Only after both come back empty should you conclude the run genuinely found no candidates,
+     and say so plainly in your final report along with the fact that the agent was cut off.
+3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
    budget after each one per the budget rule above. Map the candidate's fields onto the processor's
    inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
    (omit if empty), `platformNote` → `platformNote`. Leave `evaluateOnly` unset for a discovery —
    a new company has no previously-judged URLs, so every posting on its listing must be opened.
-3. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
+4. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
    returns.
 
 Do not second-guess the discovery agent's de-duplication by re-searching yourself, and do not open
@@ -350,7 +365,7 @@ different wrapper:
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — more than 100 findings in one request; you should never be near this.
 - **401** — token invalid. STOP immediately and report.
-- **Network error / 5xx** — retry the POST at most twice, then report the failure plainly. Never silently give up: a run whose POST failed produced NOTHING, and saying otherwise is a false report.
+- **Network error / 5xx** — retry the POST at most twice, then report the failure plainly. Never silently give up: a run whose POST failed produced NOTHING, and saying otherwise is a false report. Print the payload per **Final output** below so the run stays replayable.
 
 `rateLimit.throttled` counts findings the API accepted but did NOT process because they exceeded the hourly budget. If you followed the budget rule this is 0. If non-zero, report it — do not resubmit those now; they are re-found next run.
 
@@ -379,3 +394,14 @@ Then a short plain-text summary. For EVERY site touched this run (re-check or ne
 Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — the HTTP status, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
 
 If the POST failed for any reason, say so explicitly and prominently: that means this run saved nothing.
+
+**If the POST failed after all retries, print the complete submission payload verbatim** in a
+fenced ```json block as the last thing in your report — the exact object you tried to send,
+`findings`, `sitesChecked` and `rejected` together. Your scratch files are destroyed when this
+session ends, so that block is the only surviving copy and the only way the owner can replay the
+run by hand. Print the request BODY only: never the curl command, never the `Authorization` header,
+never the token. Do not truncate it or summarise it as "12 findings omitted for brevity" — a
+payload nobody can replay is the same as no payload. Confirmed 2026-08-26: a run verified 12
+findings across Diligent and Qualysoft, lost `submit_findings` to two internal errors and the curl
+POST to three 502s, and reported the failure correctly — but printed no payload, so a full run's
+work was gone.
