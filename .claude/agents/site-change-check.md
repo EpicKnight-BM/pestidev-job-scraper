@@ -24,6 +24,15 @@ The orchestrator gives you:
 - `storedListingUrls` — the posting URL set recorded on the previous run (may be empty)
 - `platformNote` — optional, e.g. "Nexum ATS, fetch <domain>/jsbq for JSON listing"
 
+## Before your first fetch — the excluded-company stop ★
+
+If `slug` or `url` names a permanently-rejected company — above all **`nix` / NIX Hungary Kft. /
+`nixstech.com`** — or the orchestrator's note says the company is permanently rejected, do not
+fetch. Return the JSON below with `"status":"skipped_permanently_rejected"`, `"changed": false`
+and empty `currentListingUrls`/`newUrls`, then stop. The orchestrator should not have
+dispatched you for such a site at all; a "confirmation fetch" of one is not a thing, and the entry belongs out of
+`sites` rather than refreshed.
+
 ## How to fetch — this is not optional
 
 Fetch with curl, never bare WebFetch. WebFetch has NO timeout parameter and CANNOT be interrupted
@@ -56,7 +65,7 @@ back unchanged as `currentListingUrls`. None of them is a reason to retry.
 ```json
 {
   "slug": "<slug>",
-  "status": "ok" | "unreachable_timeout" | "fetch_error",
+  "status": "ok" | "unreachable_timeout" | "fetch_error" | "skipped_permanently_rejected",
   "currentListingUrls": ["<every posting URL on the page right now>"],
   "newUrls": ["<URLs present now that were NOT in storedListingUrls>"],
   "changed": true | false,

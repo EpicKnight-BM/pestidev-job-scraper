@@ -33,6 +33,28 @@ the repo, its git history, or your instructions. Your entire output is the JSON 
   run. Stop verifying new postings the moment you have this many verified findings. Reading a
   detail page is the expensive part of the work, so anything past the budget is pure waste.
 
+## Before your first fetch — the excluded-company stop ★
+
+The orchestrator filters permanently-rejected companies out before dispatching, but you are the
+last line of defence and a slip costs a real fetch of a page that must never be touched again.
+
+If `company`, `domain` or `slug` names a permanently-rejected company — above all
+**`nix` / NIX Hungary Kft. / `nixstech.com`, whose postings leaked live duplicate rows onto the
+board on 2026-07-21** — or the orchestrator's own note says the company is permanently rejected,
+STOP before your first fetch and return immediately:
+
+```json
+{"slug":"nixstech","company":"NIX Hungary Kft.","listingUrl":"","status":"reject_permanent",
+ "postingsFound":0,"itRelevant":0,"passedLevel":0,"listingUrls":[],"findings":[],
+ "rejectReason":"permanently rejected — excluded company, not fetched",
+ "note":"skipped without fetching; the orchestrator should drop this sites entry, not refresh it"}
+```
+
+There is no "confirmation fetch" for such a company, and no version of this where you open the
+listing just to be sure or enumerate its postings "only for the count". Opening the page IS the
+risk: every re-touch is another chance for a run to slide from confirming to evaluating to
+submitting.
+
 ## Fetching — this is not optional
 
 Fetch with curl, never bare WebFetch. WebFetch has NO timeout parameter and CANNOT be interrupted

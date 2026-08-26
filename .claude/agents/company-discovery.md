@@ -121,9 +121,10 @@ minddiak, muisz, zyntern, profession.hu (any URL), schonherz, tudasdiak/tudatosd
 LinkedIn (any linkedin.com/jobs/... URL), wherewework, onejob, miszisz, nofluffjobs, dreamjobs,
 melonjobs, kuka, talent, bluebird, ydiak, qdiak, alllocaljobs, allasportal, mbh, kh, raiffeisen,
 erste, mfb, unicredit, cg-jobstream/Capgemini, wise, roland, eudiakok, melodiak,
-atlasz/atlaszmunkak, pannondiak, valorebasis, trenkwalder, workcenter, workly, frissdiplomas.hu,
-random_email, **nix / NIX Hungary Kft. / nixstech.com** (this one slipped through on 2026-07-21 and
-produced live duplicate rows on the board).
+atlasz/atlaszmunkak, pannondiak, valorebasis, trenkwalder, workcenter, workly,
+startupjobs/Startup Jobs, frissdiplomas.hu, random_email,
+**nix / NIX Hungary Kft. / nixstech.com** (this one slipped through on 2026-07-21 and produced
+live duplicate rows on the board).
 
 **Job-board aggregators (out of scope even though technically new sites):** CVOnline.hu, Jobline.hu,
 Jooble.org, Indeed.hu.
