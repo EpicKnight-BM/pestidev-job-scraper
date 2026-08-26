@@ -87,7 +87,7 @@ timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer
 
 Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and (once you've checked it at least once under this rule) `listingUrls` — the exact set of posting URLs you saw on its listing last time. `listingUrls` is what makes Step 2 cheap: it's how you tell whether the page changed at all since last visit, without re-reading anything.
-- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these.
+- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: skip it outright, fetch nothing for it, and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
 - `knownUrls` — job URLs you have already successfully submitted. Never submit these again.
 - `uploadBudget` — `{ remaining, limit, resetInSeconds }`. **`remaining` is the MAXIMUM number of job postings you can upload this run** (hard cap, default 10/hour, bounds the damage if the token leaks). See the budget rule below.
 
@@ -129,7 +129,33 @@ Fall back to WebFetch ONLY when you genuinely need rendered content curl cannot 
 
 ## Step 2 — re-check aged sites (cheap change-check FIRST, full work only if something actually changed)
 
-For every entry in `sites` whose `lastChecked` is more than 7 days ago:
+### ⚠ FIRST, before any fetch — drop permanently-rejected sites out of the re-check list ★
+
+`permanentlyRejected` OUTRANKS `sites`. Build your Step 2 work list by taking the aged entries in
+`sites` and REMOVING every one whose company, domain or slug appears in `permanentlyRejected` or in
+the STRICT exclusion list below. Match on the bare domain/company, not the exact URL —
+`nixstech.com`, "NIX Hungary Kft." and `sites["nixstech"]` are all the same excluded thing.
+
+For a site removed this way:
+- **Fetch nothing for it — not the listing, not the sitemap, not a "confirmation fetch".** There is
+  no such thing as a confirmation fetch for a permanently-rejected site. The exclusion IS the
+  confirmation, and re-touching the page is the entire risk.
+- **Do not send a `sitesChecked` entry for it.** That entry is exactly what keeps it alive in
+  `sites` and drags it back into the re-check window a week later.
+- **Do not re-send it under `rejected` either.** It is already permanent. Re-adding it only grows a
+  pile of near-duplicate entries for one company — this already happened repeatedly to Cellum Global
+  Zrt., each run re-noting the same complaint instead of the entry simply staying out of rotation.
+- Say it in ONE line of your final report — `skipped (permanently rejected): nixstech` — and stop
+  there.
+
+Confirmed 2026-08-21: `sites["nixstech"]` (NIX Hungary Kft.) was re-fetched on schedule even
+though `permanentlyRejected` held three separate entries for it saying never to. NIX is the company
+whose postings leaked onto the live board on 2026-07-21, and three `nixstech.com` job URLs still sit
+in `knownUrls` from that incident. A stale `sites` entry you never touch is harmless; one you
+refresh every week is that incident waiting for a single run to read "confirmation fetch" as licence
+to also evaluate and submit.
+
+For every REMAINING entry in `sites` whose `lastChecked` is more than 7 days ago:
 
 1. **Fetch just the listing** (its saved `url` — or the sitemap, if that's how you reach it) and extract every distinct posting URL currently visible on it. This one cheap fetch is the only thing you must always do for a re-check.
 2. **Compare that set against the site's stored `listingUrls`** from Step 1 (treat as empty if the site has none yet — e.g. its first re-check under this rule).
@@ -287,7 +313,7 @@ Field rules:
   Only include a label from this list if the posting actually names it (or an obvious synonym — e.g. "Postgres" → PostgreSQL, "Node" → Node.js). If the posting's tech stack has NOTHING on this list (e.g. it only mentions SharePoint, Power Automate, Fortinet, specific network hardware, or non-technical tools), leave `technologies` empty/omit it entirely rather than writing an unrecognized label — an empty field is correct and normal, a made-up label is not. Don't pad the list with things not actually mentioned.
 - `sitesChecked` — every company you checked this run (new or re-checked), including ones with no fit. This advances `lastChecked`.
 - `listingUrls` (inside each `sitesChecked[slug]` entry) — the CURRENT full set of distinct posting URLs you saw on that site's listing page just now, regardless of whether each one qualified. Always include the complete set, not only new/submitted ones — this is what next run's Step 2 change-check diffs against, so leaving it out (or sending only new URLs) breaks the skip-if-unchanged logic for that site.
-- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain). Never put a site here just because it has no fit today — that belongs in `sitesChecked`. Entries here are permanent and never re-checked.
+- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain). Never put a site here just because it has no fit today — that belongs in `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
 
@@ -310,7 +336,7 @@ The list below is written in REST status codes, but the CONDITIONS are transport
 
 ## STRICT exclusion list — in ADDITION to whatever `sites`/`permanentlyRejected` already contains
 
-**Existing scraper fleet (never add, regardless of which page on the domain):** karrierhungaria, minddiak, muisz, zyntern, profession.hu (any URL), schonherz, tudasdiak/tudatosdiak, otp, vizmuvek, LinkedIn (any linkedin.com/jobs/... URL), wherewework, onejob, miszisz, nofluffjobs, dreamjobs, melonjobs, kuka, talent, bluebird, ydiak, qdiak, alllocaljobs, allasportal, mbh, kh, raiffeisen, erste, mfb, unicredit, cg-jobstream/Capgemini, wise, roland, eudiakok, melodiak, atlasz/atlaszmunkak, pannondiak, valorebasis, trenkwalder, workcenter, workly, frissdiplomas.hu, random_email, **nix / NIX Hungary Kft. / nixstech.com** (this one slipped through on 2026-07-21 and produced live duplicate rows on the board — double-check any "new" candidate company's domain against this whole list, not just skim it).
+**Existing scraper fleet (never add, regardless of which page on the domain):** karrierhungaria, minddiak, muisz, zyntern, profession.hu (any URL), schonherz, tudasdiak/tudatosdiak, otp, vizmuvek, LinkedIn (any linkedin.com/jobs/... URL), wherewework, onejob, miszisz, nofluffjobs, dreamjobs, melonjobs, kuka, talent, bluebird, ydiak, qdiak, alllocaljobs, allasportal, mbh, kh, raiffeisen, erste, mfb, unicredit, cg-jobstream/Capgemini, wise, roland, eudiakok, melodiak, atlasz/atlaszmunkak, pannondiak, valorebasis, trenkwalder, workcenter, workly, startupjobs/Startup Jobs, frissdiplomas.hu, random_email, **nix / NIX Hungary Kft. / nixstech.com** (this one slipped through on 2026-07-21 and produced live duplicate rows on the board — double-check any "new" candidate company's domain against this whole list, not just skim it).
 
 **Job-board aggregators (out of scope even though technically new sites):** CVOnline.hu, Jobline.hu, Jooble.org, Indeed.hu.
 

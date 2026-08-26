@@ -161,7 +161,7 @@ EXACTLY the canonical form" above before you change a character of it.
 
 Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and `listingUrls` — the exact set of posting URLs seen on its listing last time. `listingUrls` is what makes Step 2 cheap.
-- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these.
+- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: dispatch nothing for it and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
 - `knownUrls` — job URLs already successfully submitted. Never submit these again.
 - `uploadBudget` — `{ remaining, limit, resetInSeconds }`. **`remaining` is the MAXIMUM number of job postings you can upload this run** (hard cap, default 10/hour, bounds the damage if the token leaks).
 
@@ -211,7 +211,34 @@ Stalling costs the POST — and a run that never POSTs produced nothing at all.
 
 ## Step 2 — re-check aged sites
 
-For every entry in `sites` whose `lastChecked` is more than 7 days ago:
+### ⚠ FIRST, before you dispatch anything — drop permanently-rejected sites out of the re-check list ★
+
+`permanentlyRejected` OUTRANKS `sites`. Build your Step 2 work list from the aged entries in
+`sites` and REMOVE every one whose company, domain or slug appears in `permanentlyRejected` or in
+the STRICT exclusion list in `.claude/agents/company-discovery.md`. Match on the bare
+domain/company, not the exact URL — `nixstech.com`, "NIX Hungary Kft." and `sites["nixstech"]` are
+all the same excluded thing.
+
+For a site removed this way:
+- **Dispatch NOTHING for it — no `site-change-check`, no `site-processor`, and no inline fetch of
+  your own.** There is no such thing as a "confirmation fetch" for a permanently-rejected site: the
+  exclusion IS the confirmation, and re-touching the page is the entire risk.
+- **Do not send a `sitesChecked` entry for it.** That entry is exactly what keeps it alive in
+  `sites` and drags it back into the re-check window a week later.
+- **Do not re-send it under `rejected` either.** It is already permanent. Re-adding it only grows a
+  pile of near-duplicate entries for one company — this already happened repeatedly to Cellum Global
+  Zrt., each run re-noting the same complaint instead of the entry simply staying out of rotation.
+- Say it in ONE line of your final report — `skipped (permanently rejected): nixstech` — and stop
+  there.
+
+Confirmed 2026-08-21: `sites["nixstech"]` (NIX Hungary Kft.) was re-fetched on schedule even
+though `permanentlyRejected` held three separate entries for it saying never to. NIX is the company
+whose postings leaked onto the live board on 2026-07-21, and three `nixstech.com` job URLs still sit
+in `knownUrls` from that incident. A stale `sites` entry you never touch is harmless; one you
+refresh every week is that incident waiting for a single run to read "confirmation fetch" as licence
+to also evaluate and submit.
+
+For every REMAINING entry in `sites` whose `lastChecked` is more than 7 days ago:
 
 1. **Dispatch `site-change-check`** with the site's `url`, `slug`, stored `listingUrls`, and any
    `platformNote` you have for it. These are cheap and may run in parallel.
@@ -255,8 +282,11 @@ With remaining budget:
    - Only after both come back empty should you conclude the run genuinely found no candidates,
      and say so plainly in your final report along with the fact that the agent was cut off.
 3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
-   budget after each one per the budget rule above. Map the candidate's fields onto the processor's
-   inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
+   budget after each one per the budget rule above. **Re-check each candidate's company and domain
+   against `permanentlyRejected` and the exclusion list before dispatching**, even though the
+   discovery agent already de-duplicated: a candidate matching either one is dropped silently — no
+   processor, no `sitesChecked`, no fresh `rejected` entry. Map the candidate's fields onto the
+   processor's inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
    (omit if empty), `platformNote` → `platformNote`. Leave `evaluateOnly` unset for a discovery —
    a new company has no previously-judged URLs, so every posting on its listing must be opened.
 4. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
@@ -340,7 +370,7 @@ Field rules:
 - `technologies` — comma-joined canonical labels from your mapping above.
 - `sitesChecked` — every company touched this run (new or re-checked), including ones with no fit. This advances `lastChecked`.
 - `listingUrls` (inside each `sitesChecked[slug]` entry) — the CURRENT full set of distinct posting URLs on that site's listing, from whichever agent last saw it, regardless of whether each qualified. Sending only new/submitted URLs breaks the skip-if-unchanged logic for that site.
-- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain), i.e. agents that returned `reject_permanent`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked.
+- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain), i.e. agents that returned `reject_permanent`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
 
