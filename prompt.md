@@ -304,7 +304,7 @@ The list below is written in REST status codes, but the CONDITIONS are transport
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — you sent more than 100 findings in one request; you should never be near this if you followed the budget rule.
 - **401** — token invalid. STOP immediately and report.
-- **Network error / 5xx** — retry the POST at most twice, then report the failure plainly. Never silently give up: a run whose POST failed produced NOTHING, and saying otherwise is a false report.
+- **Network error / 5xx** — retry the POST at most twice, then report the failure plainly. Never silently give up: a run whose POST failed produced NOTHING, and saying otherwise is a false report. Print the payload per **Final output** below so the run stays replayable.
 
 `rateLimit.throttled` counts findings the API accepted but did NOT process because they exceeded the hourly budget. If you followed the budget rule this is 0. If non-zero, report it — do not resubmit those now; they are re-found next run.
 
@@ -338,3 +338,14 @@ investigated and their outcomes, the exact list of any NEW findings you submitte
 and the API's response — the HTTP status (or, on MCP, whether the tool result was `ok:true` or `isError`),
 how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
 If the submit failed for any reason, say so explicitly and prominently: that means this run saved nothing.
+
+**If the submit failed after all retries, print the complete submission payload verbatim** in a
+fenced ```json block as the last thing in your report — the exact object you tried to send,
+`findings`, `sitesChecked` and `rejected` together. Your scratch files are destroyed when this
+session ends, so that block is the only surviving copy and the only way the owner can replay the
+run by hand. Print the request BODY only: never the curl command, never the `Authorization` header,
+never the token. Do not truncate it or summarise it as "12 findings omitted for brevity" — a
+payload nobody can replay is the same as no payload. Confirmed 2026-08-26: a run verified 12
+findings across Diligent and Qualysoft, lost `submit_findings` to two internal errors and the curl
+POST to three 502s, and reported the failure correctly — but printed no payload, so a full run's
+work was gone.
