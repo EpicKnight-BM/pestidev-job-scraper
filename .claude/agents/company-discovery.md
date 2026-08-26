@@ -2,7 +2,7 @@
 name: company-discovery
 description: "[prompt-v2.md ONLY — do not use on a run driven by prompt.md] Searches for Hungarian companies with their own career pages that are not yet tracked, rotating across role/platform/sector query buckets. Returns candidate companies with domains, already de-duplicated against tracked sites and the exclusion list. Does NOT open career pages or evaluate postings."
 model: sonnet
-tools: WebSearch, Bash, Read
+tools: WebSearch, Bash, Read, Write
 maxTurns: 35
 ---
 
@@ -147,9 +147,12 @@ CIB Bank, Schaeffler (all: wrong vertical/role type).
 
 You have a hard `maxTurns` ceiling. When you hit it you are cut off **mid-sentence**, and whatever
 you had found is lost: the orchestrator receives a completed-but-empty notification and has to
-notice and prompt you for it. Confirmed 2026-08-24 — this agent burned 48 tool uses against a
-20-turn cap and returned nothing at all; the run was only saved because the orchestrator spotted the
-empty result and asked again.
+notice and prompt you for it. This has now happened TWICE. Confirmed 2026-08-24 — this agent burned
+48 tool uses against a 20-turn cap and returned nothing at all. Confirmed again 2026-08-26 at the
+current 35-turn cap, with this very section already in place. Both runs were saved only because the
+orchestrator spotted the empty result and asked again. Read that as proof that intending to budget
+your turns is not enough on its own: the checkpoint file below is the part that actually protects
+the run.
 
 So:
 
@@ -159,6 +162,29 @@ So:
 - If you are running long, return what you have with an honest `bucketsUsed` and a `note` saying you
   stopped early. A short honest list beats a long one that never arrives.
 - Never spend a turn on a search you cannot afford to write up.
+
+## Checkpoint every candidate to disk the moment you confirm it
+
+Do not hold candidates only in your own context — you cannot emit them if you are cut off. Every
+time a candidate passes your domain check, **use the `Write` tool** to save the complete list you
+have so far to this exact path:
+
+    /tmp/pestidev-discovery-candidates.json
+
+- The content is just the `candidates` array from the schema below — a JSON array of the objects
+  you would return, and nothing else.
+- **Write the WHOLE array every time, replacing the file.** That is one cheap tool call, it keeps
+  the file valid JSON at every instant, and the first write of the run overwrites any rows a
+  previous run left behind in the same sandbox.
+- Do it BEFORE your next search, not at the end. A checkpoint you were about to write is worth
+  exactly as much as one you never wrote.
+- Use `Write`, not a shell redirect. Bash permissions here match on literal command prefix, so an
+  improvised `echo`/`printf`/`cat` redirect falls through to the auto-mode classifier and may be
+  refused mid-run — which would silently defeat the whole point of checkpointing.
+- Still return the full JSON below as your actual answer. The file is a safety net, not the
+  deliverable, and the orchestrator reads it only if your reply never arrives.
+
+A checkpointed candidate survives a mid-sentence cutoff. One held in your head does not.
 
 ## Return exactly this JSON, nothing else
 

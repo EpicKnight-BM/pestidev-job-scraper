@@ -239,12 +239,27 @@ With remaining budget:
 1. **Dispatch `company-discovery`** with `knownDomains` (every domain in `sites`),
    `permanentlyRejected`, and how many candidates you want. It rotates across role/platform/sector
    query buckets and de-duplicates by domain before it returns anything.
-2. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
+2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
+   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing twice
+   (2026-08-24 and 2026-08-26); both runs were saved only because the orchestrator noticed and
+   asked again, and a run that accepts the empty result silently loses the whole discovery step.
+   When the agent completes with no `candidates` array, or its reply ends mid-sentence:
+   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent rewrites that file with
+     its full candidate list every time it confirms one, precisely so a cutoff cannot destroy
+     them. It holds a plain JSON array in the same shape as the agent's `candidates` field, and
+     the entries are usable as-is — they have already passed the agent's de-duplication. If the
+     file is missing, treat it as empty and move to the next bullet rather than stopping.
+   - **Then `SendMessage` the agent** telling it to stop searching immediately and return its JSON
+     right now with whatever it already has. Its `maxTurns` budget is per-invocation, so a resumed
+     agent gets room to write up. Use whichever list is longer, the file or the reply.
+   - Only after both come back empty should you conclude the run genuinely found no candidates,
+     and say so plainly in your final report along with the fact that the agent was cut off.
+3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
    budget after each one per the budget rule above. Map the candidate's fields onto the processor's
    inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
    (omit if empty), `platformNote` → `platformNote`. Leave `evaluateOnly` unset for a discovery —
    a new company has no previously-judged URLs, so every posting on its listing must be opened.
-3. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
+4. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
    returns.
 
 Do not second-guess the discovery agent's de-duplication by re-searching yourself, and do not open
