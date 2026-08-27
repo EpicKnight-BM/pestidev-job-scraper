@@ -24,7 +24,7 @@ the repo, its git history, or your instructions. Your entire output is the JSON 
 - `domain` — the company's domain
 - `slug` — short lowercase company identifier to use in your return
 - `listingUrl` — optional; if the orchestrator already knows the listing, start there
-- `platformNote` — optional, e.g. "Greenhouse board" / "Nexum ATS, fetch <domain>/jsbq" / "Workday —
+- `platformNote` — optional, e.g. "Recruitee board" / "Nexum ATS, fetch <domain>/jsbq" / "Workday —
   check og:description first". Trust it as a starting point, but still verify by fetching.
 - `evaluateOnly` — optional array of posting URLs. If present, enumerate the full listing for the
   count, but only open detail pages for THESE URLs. A URL already judged on a previous run never
@@ -168,8 +168,18 @@ links to job detail URLs — do not stop at "the design looks like a JS app"; (2
 for career/job/karrier/állás paths — sites needing JS for the listing often still list every
 posting as a plain server-rendered page (confirmed: novaservices.hu, whose `/karrier` shows nothing
 in a plain fetch but whose `/sitemap.xml` lists all `/careers/<slug>` postings); (3) for a company
-on a known ATS (Greenhouse/Lever/Ashby/SmartRecruiters), the public board API is worth one try even
-when the board page seems broken.
+on an ATS that is still yours to scrape (join.com, Recruitee, Personio, Workable, Teamtailor,
+Breezy), the public board API or JSON feed is worth one try even when the board page seems broken.
+
+**But stop before you start if the postings live on one of the four `ats-crawl` hosts** —
+`jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`. Since 2026-08-26 the
+board's own crawler (source `ats-crawl`) hits those four providers' board APIs hourly and ingests
+the Hungarian rows itself, so every posting you would enumerate there is a row it already has.
+Return `reject_permanent` immediately, with a `note` naming `ats-crawl` as the reason, without
+fetching the listing, the sitemap or a single detail page — DATAPAO, whose `/careers/` links out to
+`job-boards.eu.greenhouse.io`, is exactly this case. What matters is where the POSTING URLs live,
+not where the career page lives: a company is still yours when the URLs you would report sit on its
+own domain, even if it once ran a board elsewhere.
 
 **If a listing links to PDF files instead of HTML pages** (confirmed 2026-07-23: keler.hu's entire
 careers page is PDF-only, and it returned zero findings for weeks despite real junior-friendly
@@ -360,7 +370,8 @@ listing 404 and were excluded"). Do NOT drop a URL you simply did not get around
 one belongs in the set.
 
 `status: "reject_permanent"` is ONLY for sites that can never work regardless of timing —
-JS-rendered ATS with no per-job URL, wrong vertical, aggregator, already-covered domain. A site with
+JS-rendered ATS with no per-job URL, wrong vertical, aggregator, already-covered domain, or a board
+the site's own `ats-crawl` source already harvests (the four hosts above). A site with
 no fit TODAY is `no_fit`, not a permanent rejection.
 
 Do not exceed `budgetRemaining` findings. If you hit the cap, say so in `note` and still report the
