@@ -19,8 +19,12 @@ endpoint, and never go looking for a token.
 
 ## Your input
 
-- `knownDomains` — every domain already in the registry's `sites`
-- `permanentlyRejected` — companies/sites that can never work
+- `knownDomainsFile` — PATH to a file, one entry per line, holding every domain already in the
+  registry's `sites` PLUS every permanently-rejected company/site. This is `knownDomains` and
+  `permanentlyRejected` combined; everywhere below that says "in `knownDomains`" means "a line in
+  this file". You are given a path rather than the list itself because the list is ~900 lines and
+  pasting it inline is what caused it to be dropped from the dispatch entirely — see
+  **Load the file FIRST** below.
 - `wanted` — how many fresh candidates the orchestrator wants back
 - `recentBuckets` — optional; which query buckets recent runs already used, so you can rotate away
 
@@ -29,6 +33,15 @@ endpoint, and never go looking for a token.
 The easy hits from any one query dry up fast. Rotate across all three buckets below, and do NOT
 default to the same "fejlesztő"/"developer" search every run just because it is the first one that
 comes to mind. Pick a different combination each run than the obvious one.
+
+**Use at least one query from EACH of the three buckets, and keep platform queries to at most half
+your total.** The platform bucket is the most tempting — `site:join.com`, `site:*.recruitee.com` and
+friends return long clean result lists — and it is also the most exhausted, because `ats-crawl` and
+months of prior runs have already harvested those boards. A platform-only pass therefore returns
+almost entirely already-tracked companies. Confirmed 2026-09-02: a run spent all four of its queries
+on the platform bucket (join.com, recruitee, teamtailor, personio) and 5 of its 6 candidates were
+already known. The role and sector buckets are where the untracked Hungarian companies with their
+own career pages actually surface, so they are not the optional half of this list.
 
 **By role** — cycle through ALL of these across runs, not just generic "fejlesztő"/"developer":
 Python fejlesztő/Python developer, Java fejlesztő/Java developer, tesztautomatizálási mérnök/test
@@ -60,6 +73,38 @@ gamedev/játékfejlesztő stúdió Budapest, logisztikai szoftver Budapest, insu
 technológia Budapest, digitális/web ügynökség Budapest, egyetemi spinoff/startup Budapest.
 
 ## De-duplicate by DOMAIN, not by company name
+
+### Load the file FIRST — before your first search ★
+
+Your very first action is to load `knownDomainsFile` and confirm it is real:
+
+```
+wc -l "<knownDomainsFile>" ; echo "exit=$?"
+```
+
+Check each candidate against it with an EXACT whole-line match, never a substring scan:
+
+```
+grep -qxF "<the candidate's domain or tenant identity>" "<knownDomainsFile>" && echo KNOWN || echo NEW
+```
+
+`grep -qxF` is exact (`-x` whole line, `-F` literal), which is precisely the matching rule the rest
+of this section describes — it will not let `recruitee.com` swallow `someothercompany.recruitee.com`.
+Reading it from disk also costs you no context, so there is no list too large to check against.
+
+**If the path is missing from your dispatch, or the file does not exist or is empty, STOP and say
+so.** Return `"candidates": []` with a `note` opening `NO knownDomainsFile` and nothing else. Do NOT
+search anyway: without the list you cannot tell a discovery from a company the board has tracked for
+months, and every candidate you return has to be re-checked by the orchestrator by hand. Confirmed
+2026-09-02: the list was left out of the dispatch as "too large to hand the agent inline", the search
+ran blind, and 5 of 6 candidates returned (SolvencyAnalytics, KFS Group, GitRabbit, INSPYRE, Telio
+Group) were already tracked or already permanently rejected — the entire discovery step produced one
+usable company.
+
+State the count you loaded in your return (`checkedAgainst`), so the orchestrator can see from the
+result whether de-duplication actually happened rather than assuming it did.
+
+### The rule itself
 
 **Before returning ANY candidate, check its DOMAIN — not just whether the name looks unfamiliar —
 against every domain in `knownDomains`.** A repeat search WILL resurface companies already tracked,
@@ -239,6 +284,7 @@ A checkpointed candidate survives a mid-sentence cutoff. One held in your head d
       "platformNote": "<e.g. 'Recruitee board' / 'Workday — check og:description first' / empty>"
     }
   ],
+  "checkedAgainst": <how many lines you loaded from knownDomainsFile — 0 means you did NOT de-duplicate>,
   "droppedAsKnown": <count of hits discarded because the FULL tenant identity was already tracked>,
   "droppedAsExcluded": <count discarded against the exclusion list or broken platforms>,
   "note": "<optional: one line — stopped early on turns, a platform that blocked you, anything the orchestrator should know. Empty is fine.>"
