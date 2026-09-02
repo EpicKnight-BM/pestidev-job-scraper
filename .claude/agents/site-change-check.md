@@ -89,6 +89,20 @@ back unchanged as `currentListingUrls`. None of them is a reason to retry.
      existing posting, excluded from newUrls").
 5. Return the result. Do not open any detail page for any reason.
 
+**If `storedListingUrls` is absent from your dispatch entirely, say so loudly.** Absent is not the
+same as present-but-empty: an empty set is a real state (a site we have never enumerated), while an
+absent field means the orchestrator dispatched you wrong and you have nothing to diff against. Still
+return your `currentListingUrls` — the fetch was not wasted — but set `"changed": true` and open your
+`note` with the exact words `NO storedListingUrls IN DISPATCH`. Do NOT report `changed: false`, which
+reads as "this page is unchanged" and lets a stale listing pass silently. Confirmed 2026-09-02: every
+agent in that run inferred `changed: false` from a missing field, and 14 sites were wrongly reported
+unchanged.
+
+Note that step 4's rotated-URL check diffs against `storedListingUrls` too, so it cannot run either
+when the field is missing. Every rotated URL will therefore look new. That is the second half of why
+this must be reported rather than quietly worked around: the orchestrator has to know your `newUrls`
+was computed with no rotation filtering before it dispatches anything on the strength of it.
+
 ## Return exactly this JSON, nothing else
 
 ```json
