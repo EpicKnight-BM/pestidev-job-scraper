@@ -228,7 +228,16 @@ only for the URLs it names.
 
 Verify by reading the ACTUAL detail page, never just a title or a search snippet.
 
-1. **Real, distinct, navigable URL per posting.** Reject any site where several different job titles
+1. **Real, distinct, navigable URL per posting — and prefer its own canonical form.** If the detail
+   page carries a `<link rel="canonical">` tag, report THAT href as the posting's `url`, not
+   whatever link you followed to reach it — this avoids incidental variant-URL duplicates within
+   one run (query strings, tracking params, alternate share links). It does NOT protect against a
+   platform whose canonical URL itself rotates between separate runs — confirmed 2026-09-02 on
+   joinus.hu (Knorr-Bremse), where the same posting's own canonical URL differed from an
+   earlier-crawl URL for the identical title/company/body. That case is handled one layer up, by the
+   URL-churn check in `site-change-check` (and the orchestrator's Step 2) comparing this run's URLs
+   against the site's previously stored ones — not something you can catch from inside a single
+   fetch. Reject any site where several different job titles
    share one page/anchor with no distinct detail URL per job — the URL is the database row identity,
    and a shared URL would silently overwrite a different job. A single posting that legitimately
    describes ONE role with two variants under one shared application form (e.g. a ".NET/JAVA
