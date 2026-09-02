@@ -58,7 +58,36 @@ back unchanged as `currentListingUrls`. None of them is a reason to retry.
    `<a href>` links to job detail URLs — do not conclude "no links" because the page looks like a
    JS app. If `platformNote` names an endpoint (e.g. Nexum `/jsbq` returning JSON), use it.
 3. Compare the set you just extracted against `storedListingUrls`.
-4. Return the result. Do not open any detail page for any reason.
+4. **Before finalizing which URLs are "new" — check for a rotated URL, not a rotated posting ★**
+
+   Confirmed 2026-09-02 on joinus.hu (Knorr-Bremse): the exact same posting — "Embedded Middleware
+   Developer Trainee – EBS/ABS System and Integration Team", same company, same body — had TWO
+   different URLs across two crawls. An earlier-indexed link ending `...-f16d` now 404s; the live
+   posting's own `<link rel="canonical">` now points to `...-f16d-f3ee`. Some ATS platforms mint a
+   fresh random suffix for a posting's URL on every crawl or every publish — the posting did not
+   change, only its URL did. Treated naively (every URL absent from `storedListingUrls` is "new"),
+   this creates a fresh duplicate row on the live board every single time it rotates, because
+   `(source, url)` is the database row identity and the API has no way to know two different URL
+   strings are the same posting — the same "url IS the row identity" principle behind every hand
+   scraper on this board, which is why volatile-ID sources there get migrated in place instead of
+   churning new rows.
+
+   So before adding a URL to `newUrls`, check it against every URL in `storedListingUrls`:
+   - Take the URL's last path segment.
+   - Strip ONE trailing `-<token>` where `<token>` is a short (3-8 character) lowercase
+     letters/digits hyphen-separated tail (e.g. `-f3ee`, `-a1b2c3`). Repeat once more if the result
+     still ends in such a tail — some platforms append more than one.
+   - If the stripped segment of a "new" URL is IDENTICAL to the stripped segment of a stored URL
+     (same domain and path prefix otherwise), this is NOT a new posting — it is the same posting's
+     URL rotating. Do NOT put it in `newUrls`.
+   - Still put the CURRENT (rotated) URL in `currentListingUrls` — that is what next run's comparison
+     needs, and it is what stops the same rotation from being flagged as "new" again.
+   - If the match is not clean, fall through to treating it as new — a missed real posting is worse
+     than one extra evaluation. But do not skip this check outright just because it takes an extra
+     comparison; that is exactly how the joinus.hu duplicate reached the live board.
+   - If you matched one or more URLs this way, say so in `note` (e.g. "1 URL rotation matched to an
+     existing posting, excluded from newUrls").
+5. Return the result. Do not open any detail page for any reason.
 
 ## Return exactly this JSON, nothing else
 
