@@ -55,17 +55,18 @@ support/helpdesk/ügyfélszolgálati technikus, IT projektasszisztens.
 Query shape: `"<role> gyakornok saját karrier oldal"`,
 `"junior/medior <role> karrier oldal -jooble -indeed -profession -linkedin"`.
 
-**By platform** — these ATS platforms have repeatedly turned out to be plain server-rendered:
-join.com has produced confirmed findings, and `*.recruitee.com`, `*.jobs.personio.com` and
-`*.teamtailor.com` already carry tracked sites. Search them directly instead of hoping a generic
-query surfaces one: `site:join.com`, `site:*.teamtailor.com`, `site:*.recruitee.com`,
-`site:*.jobs.personio.com`, `site:*.breezy.hr` — each combined with "Budapest" or "Hungary" plus an
-IT role word, for small companies (under ~20 open roles).
+**By platform** — `join.com` and `*.breezy.hr` have repeatedly turned out to be plain
+server-rendered and are still yours to search directly: `site:join.com`, `site:*.breezy.hr` — each
+combined with "Budapest" or "Hungary" plus an IT role word, for small companies (under ~20 open
+roles).
 
-**Greenhouse, Lever, Ashby and SmartRecruiters were in this bucket until 2026-08-27 and are
-deliberately gone from it** — the board harvests those four itself now; see "Never return a
-candidate on the four ats-crawl hosts" below. Do not put them back, and do not reach them sideways
-through a generic query either.
+**Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Personio, BambooHR and Teamtailor are
+deliberately NOT in this bucket** — the board harvests all eight itself now (Greenhouse/Lever/Ashby/
+SmartRecruiters since 2026-08-26, Recruitee/Personio since 2026-08-30, BambooHR/Teamtailor since
+2026-09-01); see "Never return a candidate on the eight `ats-crawl` hosts" below. Do not run
+`site:*.recruitee.com`, `site:*.jobs.personio.com`, `site:*.teamtailor.com` or `site:*.bamboohr.com`
+— that used to be this bucket's advice and it is now stale, and every hit is duplicate work. Do not
+put any of the eight back, and do not reach them sideways through a generic query either.
 
 **By sector** — generic "IT állás cég Magyarország" queries increasingly resurface companies
 already tracked as the easy pool thins. Search by industry instead: fintech Budapest,
@@ -142,24 +143,34 @@ company on those platforms was thrown away.
 When in doubt, RETURN the candidate. A duplicate costs the orchestrator one cheap re-check that the
 `sites` map will catch; a wrongly-dropped company is invisible and never comes back.
 
-**The four `ats-crawl` hosts are the ONE deliberate exception to everything in this section.** There
-you DO drop the whole platform, tenant identity and all — not because the tenant looks known, but
-because another source already harvests every tenant on it. That rule is next; nothing above
+**The eight `ats-crawl` hosts are the ONE deliberate exception to everything in this section.**
+There you DO drop the whole platform, tenant identity and all — not because the tenant looks known,
+but because another source already harvests every tenant on it. That rule is next; nothing above
 overrides it, and it overrides nothing below it either. Everywhere else, "drop the whole platform"
 remains the 2026-08-24 bug.
 
-## Never return a candidate on the four `ats-crawl` hosts — the board harvests them itself
+## Never return a candidate on the eight `ats-crawl` hosts — the board harvests them itself
 
 Since 2026-08-26 the site runs its own ATS crawler (`cron_jobs_ATSCRAWL-background.mjs`, source
 `ats-crawl`, hourly) that calls the public board API of every company in its `ats_tenants` table and
-ingests the Hungarian rows directly. It covers exactly four providers:
+ingests the Hungarian rows directly. Started with four providers and grew — it now covers eight:
 
-- **Ashby** — `jobs.ashbyhq.com`
-- **Greenhouse** — `job-boards.greenhouse.io`, `job-boards.eu.greenhouse.io`, `boards.greenhouse.io`
-- **Lever** — `jobs.lever.co`, `jobs.eu.lever.co`
-- **SmartRecruiters** — `jobs.smartrecruiters.com`, `careers.smartrecruiters.com`
+- **Ashby** — `jobs.ashbyhq.com` (since 2026-08-26)
+- **Greenhouse** — `job-boards.greenhouse.io`, `job-boards.eu.greenhouse.io`, `boards.greenhouse.io` (since 2026-08-26)
+- **Lever** — `jobs.lever.co`, `jobs.eu.lever.co` (since 2026-08-26)
+- **SmartRecruiters** — `jobs.smartrecruiters.com`, `careers.smartrecruiters.com` (since 2026-08-26)
+- **Recruitee** — `*.recruitee.com` (since 2026-08-30)
+- **Personio** — `*.jobs.personio.com` (since 2026-08-30)
+- **BambooHR** — `*.bamboohr.com` (since 2026-09-01)
+- **Teamtailor** — `*.teamtailor.com` (since 2026-09-01)
 
-A candidate whose postings live on one of those hosts is work already being done, hourly, by
+**`*.myworkdayjobs.com` (Workday) is deliberately NOT on this list.** The board only tracks a fixed,
+manually-curated set of Workday tenants there — it cannot auto-discover new ones the way it probes
+the eight above, and per the crawler's own source comments those manual entries are typically added
+*because* a routine like this one found the company first. Keep treating a new Workday candidate per
+the "Skip known-broken platforms" section below (check `og:description`), not as an automatic drop.
+
+A candidate whose postings live on one of the eight hosts is work already being done, hourly, by
 something else. Drop it before you spend anything on it — do not return it, do not fetch it, do not
 count it toward `wanted`. Count it under `droppedAsExcluded`.
 
@@ -281,7 +292,7 @@ A checkpointed candidate survives a mid-sentence cutoff. One held in your head d
       "slug": "<suggested short lowercase identifier>",
       "foundVia": "<the query that surfaced it>",
       "hintUrl": "<a career/job URL if the search gave you one, else empty>",
-      "platformNote": "<e.g. 'Recruitee board' / 'Workday — check og:description first' / empty>"
+      "platformNote": "<e.g. 'join.com board' / 'Workday — check og:description first' / empty>"
     }
   ],
   "checkedAgainst": <how many lines you loaded from knownDomainsFile — 0 means you did NOT de-duplicate>,
