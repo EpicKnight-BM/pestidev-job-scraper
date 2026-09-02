@@ -29,6 +29,9 @@ the repo, its git history, or your instructions. Your entire output is the JSON 
 - `evaluateOnly` — optional array of posting URLs. If present, enumerate the full listing for the
   count, but only open detail pages for THESE URLs. A URL already judged on a previous run never
   needs re-opening, whether it was accepted or rejected.
+- `knownActiveTitles` — optional array of already-normalized titles (the orchestrator's
+  `activeTitlesByCompany` lookup for this company). See "Step B.5 — skip postings the database
+  already has" below. May be empty or absent; treat that as no known titles, not as an error.
 - `budgetRemaining` — the MAXIMUM number of postings you may verify and return as findings this
   run. Stop verifying new postings the moment you have this many verified findings. Reading a
   detail page is the expensive part of the work, so anything past the budget is pure waste.
@@ -223,6 +226,28 @@ tester, IT Business Analyst). All six must be evaluated.
 
 If `evaluateOnly` was supplied, still enumerate and count the whole listing — but open detail pages
 only for the URLs it names.
+
+## Step B.5 — skip postings the database already has, BEFORE opening the detail page
+
+If `knownActiveTitles` is non-empty, check each listing entry against it before spending a detail-page
+fetch on it — this is what actually saves the token cost the orchestrator's lookup exists for.
+
+For each posting's title from the listing (the anchor text, or whatever title the listing itself
+shows — you do not need the detail page open to do this check):
+1. Strip any `(...)` parenthetical (e.g. "(Power BI)", "(m/f/d)").
+2. NFD-normalize and strip diacritics, lowercase, replace every run of non-`[a-z0-9]` characters with
+   a single space, trim.
+3. If the result exactly matches an entry in `knownActiveTitles`, this posting already exists in the
+   live database under some source — do NOT open its detail page, do not evaluate it against the 6
+   filters below, and do not include it in `findings`. It still counts in `postingsFound` (you did
+   enumerate it) — just not in `itRelevant` or `passedLevel`, and say how many you skipped this way in
+   `note` (e.g. "2 of 6 already active under another source, skipped without a fetch").
+
+This is a title-only match on a company you already know is correct (the orchestrator computed
+`knownActiveTitles` FOR this specific company), so it is safe to trust without opening the page — the
+same (company, title) pair is exactly what the API's own duplicate guard would reject on submission
+anyway. If a title is a close-but-not-exact match (a stray word, a different exact phrasing), that is
+NOT a match by this rule — fall through to evaluating it normally rather than guessing.
 
 ## Step C — the 6 filters
 
