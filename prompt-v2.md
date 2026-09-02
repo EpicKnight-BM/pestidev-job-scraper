@@ -318,9 +318,21 @@ Knorr-Bremse (joinus.hu) is a confirmed case of this — see its entry in the "c
 
 With remaining budget:
 
-1. **Dispatch `company-discovery`** with `knownDomains` (every domain in `sites`),
-   `permanentlyRejected`, and how many candidates you want. It rotates across role/platform/sector
-   query buckets and de-duplicates by domain before it returns anything.
+1. **Write the de-duplication list to a FILE first, then dispatch `company-discovery`** with that
+   file's path as `knownDomainsFile`, plus how many candidates you want. It rotates across
+   role/platform/sector query buckets and de-duplicates by domain before it returns anything.
+
+   Write one entry per line — every domain in `sites`, then every entry in `permanentlyRejected` —
+   to `/tmp/pestidev-known-domains.txt`, and pass that path. **Do not paste the list into the
+   dispatch prompt.** It is ~900 lines, and an inline list that size is one the dispatch will drop
+   under its own weight: confirmed 2026-09-02, when the list was omitted as "too large to hand the
+   agent inline", the agent searched blind and 5 of its 6 candidates were already tracked or already
+   permanently rejected. The agent has `Bash` and `Read`, so it greps the file directly — the list
+   can grow without ever making the dispatch bigger.
+
+   The agent returns `checkedAgainst`, the number of lines it actually loaded. **If that is 0 or
+   missing, its candidates were not de-duplicated** — check the file was written and re-dispatch,
+   rather than spending your own turns re-checking its output against the registry by hand.
 2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
    candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing twice
    (2026-08-24 and 2026-08-26); both runs were saved only because the orchestrator noticed and
