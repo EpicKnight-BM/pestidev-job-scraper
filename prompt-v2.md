@@ -163,6 +163,10 @@ Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and `listingUrls` — the exact set of posting URLs seen on its listing last time. `listingUrls` is what makes Step 2 cheap.
 - `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: dispatch nothing for it and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
 - `knownUrls` — job URLs already successfully submitted. Never submit these again.
+- `activeTitlesByCompany` — **added 2026-09-02.** A map from a normalized company name to the normalized titles of every posting currently ACTIVE in the live database for that company, across EVERY source — not just this routine's own past finds, but every hand scraper and `ats-crawl` too. This is the same (company, title) match the API uses to reject a duplicate on submission (`_ai_dupe_guard.mjs`) — you get it BEFORE `site-processor` spends a detail-page fetch and a filter judgment on a posting the API would reject anyway. **You (the orchestrator) own this lookup, not `site-processor`** — it has no registry access, same as every other credential-bearing state. Before dispatching `site-processor` for a company (Step 2 or Step 3), compute:
+  1. **Fold** the company name: NFD-normalize and strip diacritics, lowercase, replace every run of non-`[a-z0-9]` characters with a single space, trim.
+  2. Drop any resulting word that is a bare legal-form suffix — `zrt nyrt kft bt kkt kht nonprofit ev zartkoruen mukodo reszvenytarsasag gmbh ag ltd limited llc inc plc sa srl bv nv oy ab as spa co` — then rejoin the remaining words with single spaces. ("Knorr-Bremse Fékrendszerek Kft." → `knorr bremse fekrendszerek kft` → `knorr bremse fekrendszerek`.)
+  3. Look up `activeTitlesByCompany[<that key>]`. Pass whatever array you get (possibly empty) to `site-processor` as its `knownActiveTitles` input — it applies the matching title-side normalization itself (strip parentheticals, then the same fold) before comparing.
 - `uploadBudget` — `{ remaining, limit, resetInSeconds }`. **`remaining` is the MAXIMUM number of job postings you can upload this run** (hard cap, default 10/hour, bounds the damage if the token leaks).
 
 On the very first run the memory will be empty — expected. Build it up as you go via `sitesChecked`.
@@ -256,10 +260,11 @@ For every REMAINING entry in `sites` whose `lastChecked` is more than 7 days ago
      `sitesChecked` with the `currentListingUrls` the agent returned, so `lastChecked` advances, and
      move on. No detail page gets opened. This should be the common case.
    - **`changed: true`** — dispatch `site-processor` for that company with `evaluateOnly` set to the
-     agent's `newUrls`. A URL that was already in the old `listingUrls` never needs re-opening: it
-     was judged once already, accepted or rejected, and re-judging an unchanged posting on a
-     schedule is pure waste. This is also what stops previously-rejected postings that still sit on
-     the listing from being silently re-read every single re-check forever.
+     agent's `newUrls`, AND `knownActiveTitles` set per the Step 1 lookup above. A URL that was
+     already in the old `listingUrls` never needs re-opening: it was judged once already, accepted or
+     rejected, and re-judging an unchanged posting on a schedule is pure waste. This is also what
+     stops previously-rejected postings that still sit on the listing from being silently re-read
+     every single re-check forever.
    - **`unreachable_timeout`** — record it with that status and the `listingUrls` you already had.
 3. **Always store the CURRENT full `listingUrls` set** in that site's `sitesChecked` entry — every
    URL on the page right now, not just the new ones. That is what next run's comparison diffs
@@ -309,8 +314,12 @@ With remaining budget:
    candidate on one of those four hosts should never reach you at all; if one does, the discovery
    agent has drifted off its own rule and that is worth one line in your final report. Map the candidate's fields onto the
    processor's inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
-   (omit if empty), `platformNote` → `platformNote`. Leave `evaluateOnly` unset for a discovery —
-   a new company has no previously-judged URLs, so every posting on its listing must be opened.
+   (omit if empty), `platformNote` → `platformNote`, plus `knownActiveTitles` from the Step 1 lookup
+   for this company (a brand-new company usually has none, but check anyway — the same requisition
+   can already be live under a hand scraper or `ats-crawl` even for a company this routine has never
+   tracked before). Leave `evaluateOnly` unset for a discovery — a new company has no previously-judged
+   URLs, so every posting on its listing must be opened (though still skipped before a detail fetch if
+   `knownActiveTitles` matches it).
 4. Record every candidate in `sitesChecked` or `rejected` according to the status the processor
    returns.
 

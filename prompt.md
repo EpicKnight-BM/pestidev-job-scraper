@@ -89,9 +89,20 @@ Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and (once you've checked it at least once under this rule) `listingUrls` — the exact set of posting URLs you saw on its listing last time. `listingUrls` is what makes Step 2 cheap: it's how you tell whether the page changed at all since last visit, without re-reading anything.
 - `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: skip it outright, fetch nothing for it, and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
 - `knownUrls` — job URLs you have already successfully submitted. Never submit these again.
+- `activeTitlesByCompany` — **added 2026-09-02.** A map from a normalized company name to the normalized titles of every posting currently ACTIVE in the live database for that company, across EVERY source — not just this routine's own past finds, but every hand scraper and `ats-crawl` too. This is the same (company, title) match the API itself uses to reject a duplicate on submission (`_ai_dupe_guard.mjs`) — the difference is you get it BEFORE spending a detail-page fetch and a filter judgment on a posting that would be rejected anyway. See "Skip postings the database already has" below for how to use it — the keys and values are normalized in a specific way that you must reproduce exactly, or a real match will silently miss.
 - `uploadBudget` — `{ remaining, limit, resetInSeconds }`. **`remaining` is the MAXIMUM number of job postings you can upload this run** (hard cap, default 10/hour, bounds the damage if the token leaks). See the budget rule below.
 
 On the very first run the memory will be empty — expected. Build it up as you go via `sitesChecked`.
+
+### Skip postings the database already has — don't pay for a fetch the API would reject anyway
+
+Before opening ANY detail page during Step 2 or Step 3, check whether the posting already exists under some other source. Compute the lookup key and the comparison value EXACTLY as the server does, or a real match will silently miss:
+
+1. **Fold** (apply to both company and title): NFD-normalize and strip diacritics ("ó"→"o", "ű"→"u"), lowercase, replace every run of characters other than `a-z0-9` with a single space, trim.
+2. **Company, after folding**: drop any word that is a bare legal-form suffix — `zrt nyrt kft bt kkt kht nonprofit ev zartkoruen mukodo reszvenytarsasag gmbh ag ltd limited llc inc plc sa srl bv nv oy ab as spa co` — then rejoin the remaining words with single spaces. Example: "Knorr-Bremse Fékrendszerek Kft." → fold → `knorr bremse fekrendszerek kft` → drop `kft` → `knorr bremse fekrendszerek`.
+3. **Title, before folding**: strip any `(...)` parenthetical first (e.g. "(Power BI)", "(m/f/d)"), THEN fold.
+
+Look up `activeTitlesByCompany[<folded/legal-form-stripped company>]`. If the array exists and contains the posting's own normalized title, that posting is ALREADY on the board under some source — do not open its detail page, do not evaluate it against the 6 filters, and do not include it in `findings`. It still counts toward the honest `postingsFound` total in your final report (you did enumerate it), but note it separately, e.g. "3 of 8 already active under another source, skipped".
 
 ### THE BUDGET RULE — don't waste effort you can't upload
 
@@ -227,7 +238,11 @@ posting against the 6 filters:
 2. State that count explicitly when you record the site in `sitesChecked` this run (put it in a
    `postingsFound` style note in your own working notes / final output — the API doesn't require it, but
    YOU must know it before moving on).
-3. Only then evaluate each one against the 6 filters. Your final output must say, per site: "found N
+3. For each posting in that full list, check it against `activeTitlesByCompany` per "Skip postings the
+   database already has" in Step 1 — BEFORE opening its detail page. A match means the database already
+   has this posting under some source; do not fetch it, do not evaluate it. Count it in the total from
+   step 1 above, not in the count you go on to evaluate.
+4. Only then evaluate each REMAINING one against the 6 filters. Your final output must say, per site: "found N
    postings, M IT-relevant, K passed the level filter, submitted J" — not just a list of what you
    submitted. If you can't state N, you have not actually enumerated the site, you've only reacted to
    whatever a search happened to surface — go back and find the real listing/sitemap first.
