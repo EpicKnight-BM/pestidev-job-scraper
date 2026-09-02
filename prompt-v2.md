@@ -253,8 +253,39 @@ to also evaluate and submit.
 
 For every REMAINING entry in `sites` whose `lastChecked` is more than 7 days ago:
 
-1. **Dispatch `site-change-check`** with the site's `url`, `slug`, stored `listingUrls`, and any
+1. **Dispatch `site-change-check`** with the site's `url`, `slug`, `storedListingUrls`, and any
    `platformNote` you have for it. These are cheap and may run in parallel.
+
+   **Name that third field `storedListingUrls` exactly** — that is what the agent's input contract
+   calls it. The value is the site's stored `listingUrls` array from the registry, passed verbatim.
+   Calling it `listingUrls` in the dispatch is the same mistake as omitting it: the agent finds no
+   set to diff against, so it reports `changed: false` with an empty `currentListingUrls` no matter
+   what is actually on the page, and the real diff is silently lost.
+
+   Confirmed 2026-09-02 (run `cse_01UZLKkW6NMYxuJraYEq79pk`): the dispatch omitted the field, and
+   every agent said so in its own note — "No storedListingUrls provided for comparison", "no prior
+   URL set provided, so changed=false". All 14 sites came back `changed: false` with empty sets,
+   including yettel (53 stored URLs), knorrbremse-joinus (22) and rendszerinformatika (9), none of
+   which had actually emptied. Recovering from it cost six extra reconciliation dispatches and most
+   of the run's 26 minutes.
+
+   A `changed: false` carrying an EMPTY `currentListingUrls` for a site whose stored set was not
+   empty is that failure, not a real result. Treat it as a bad dispatch: check that you named the
+   field correctly and re-dispatch. Never write that empty set into `sitesChecked` — doing so
+   overwrites a good stored listing with nothing and destroys the next run's diff too.
+
+   The agent also reports this itself: a `note` beginning `NO storedListingUrls IN DISPATCH` means
+   the field never arrived. That result comes back as `changed: true` with EVERY current URL listed
+   as new — because with nothing to diff against, everything looks new. **Never feed those `newUrls`
+   to `site-processor`.** Two separate things go wrong at once:
+   - It is the site's whole listing, so it would spend the entire upload budget on one company
+     re-judging postings that were judged on earlier runs — the budget rule below exists to stop that.
+   - The rotated-URL check in step 4 of the agent's instructions ALSO diffs against
+     `storedListingUrls`, so without the field it cannot run either. Every rotated URL therefore
+     arrives labelled "new", and submitting those mints a duplicate row on the live board for a
+     posting that is already there — exactly the joinus.hu incident that check was added to prevent.
+
+   Re-dispatch the change-check with the field correctly named and use the result of THAT run.
 2. Read what comes back:
    - **`changed: false`** — nothing happened on that page since last time. Record the site in
      `sitesChecked` with the `currentListingUrls` the agent returned, so `lastChecked` advances, and
