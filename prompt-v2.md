@@ -224,10 +224,12 @@ domain/company, not the exact URL — `nixstech.com`, "NIX Hungary Kft." and `si
 all the same excluded thing.
 
 **Remove the `ats-crawl` hosts as well** — every aged entry whose postings live on
-`jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co` or `*.smartrecruiters.com`. Since 2026-08-26 the
-board runs its own crawler over those four platforms hourly (`cron_jobs_ATSCRAWL-background.mjs`,
-source `ats-crawl`), so dispatching a `site-change-check` there spends an agent re-reading a
-listing another source already reads every hour. The difference from the permanently-rejected sites
+`jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`, `*.recruitee.com`,
+`*.jobs.personio.com`, `*.bamboohr.com` or `*.teamtailor.com`. Since 2026-08-26 the board runs its
+own crawler over those eight platforms hourly (`cron_jobs_ATSCRAWL-background.mjs`, source
+`ats-crawl` — it started with the first four and grew to eight by 2026-09-01), so dispatching a
+`site-change-check` there spends an agent re-reading a listing another source already reads every
+hour. The difference from the permanently-rejected sites
 below: these have not been retired YET. Send each one ONCE under `rejected` with `ats-crawl` named
 as the reason, and from the next run on they drop out here with everything else. Full rule — and
 the one gap it deliberately leaves open — lives in `.claude/agents/company-discovery.md`.
@@ -350,12 +352,13 @@ With remaining budget:
      and say so plainly in your final report along with the fact that the agent was cut off.
 3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
    budget after each one per the budget rule above. **Re-check each candidate's company and domain
-   against `permanentlyRejected`, the exclusion list and the four `ats-crawl` hosts
-   (`jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`) before
-   dispatching**, even though the discovery agent already de-duplicated: a candidate matching any of
-   them is dropped silently — no processor, no `sitesChecked`, no fresh `rejected` entry. A
-   candidate on one of those four hosts should never reach you at all; if one does, the discovery
-   agent has drifted off its own rule and that is worth one line in your final report. Map the candidate's fields onto the
+   against `permanentlyRejected`, the exclusion list and the eight `ats-crawl` hosts
+   (`jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`, `*.recruitee.com`,
+   `*.jobs.personio.com`, `*.bamboohr.com`, `*.teamtailor.com`) before dispatching**, even though the
+   discovery agent already de-duplicated: a candidate matching any of them is dropped silently — no
+   processor, no `sitesChecked`, no fresh `rejected` entry. A candidate on one of those eight hosts
+   should never reach you at all; if one does, the discovery agent has drifted off its own rule and
+   that is worth one line in your final report. Map the candidate's fields onto the
    processor's inputs: `company` → `company`, `domain` → `domain`, `slug` → `slug`, `hintUrl` → `listingUrl`
    (omit if empty), `platformNote` → `platformNote`, plus `knownActiveTitles` from the Step 1 lookup
    for this company (a brand-new company usually has none, but check anyway — the same requisition
