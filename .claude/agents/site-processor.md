@@ -335,9 +335,23 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    is the site's own Budapest/not-Budapest classification, trust it. If location is NOT clearly
    stated anywhere (no city, generic "Magyarország", explicitly remote/home office/országos/
    hybrid-anywhere, or Budapest among several offices), RETURN it — ambiguous location defaults to
-   keep. Always fill `location` with whatever text you found, even a bare city name; leave it empty
-   only when the posting truly states nothing, since an empty field is what tells the API's backstop
-   filter to keep it.
+   keep. **A bare street/office address with no city word is not "unstated" — resolve it, don't just
+   copy it verbatim.** Some postings give only a street address (footer/impresszum office address, or
+   a "Munkavégzés helye" field naming a street but no city) with no literal "Budapest" anywhere. Work
+   out which city that address is actually in before writing `location`: a Hungarian postal code in
+   1011–1239 is always Budapest, and a recognizable Budapest district ("XI. kerület", "Angyalföld",
+   etc.) or well-known Budapest street is equally decisive. When you can resolve it to Budapest, write
+   "Budapest" into `location` yourself (keep the street after it if you like, e.g. "Budapest,
+   Nádorliget utca 7/a") — don't pass only the raw street name. The orchestrator's API call has a
+   location backstop that is a dumb substring match against ~10 fixed hint words ("budapest", "bp.",
+   "remote", "tavmunka", "home office", "orszagos", "magyarorszag", "hungary", "barhol") with no
+   geography knowledge, so a street it can't recognize gets silently dropped as "somewhere else" even
+   when it's genuinely in Budapest. If you can't tell which city an address belongs to, treat it as
+   unstated rather than guessing. Confirmed miss (2026-09-03): whitehair.hu's "Front-end fejlesztő"
+   gave only "Nádorliget utca 7/a" — Budapest XI. kerület, postcode 1117 — but was returned as raw
+   street text with none of the recognized hint words, so the API silently dropped it. Always fill
+   `location` — leave it empty only when the posting truly states nothing and no address can be
+   resolved either, since an empty field is what tells the API's backstop filter to keep it.
 
 ## On the `experienceLiteral` field — read this carefully
 
@@ -382,7 +396,7 @@ is correct and normal.
     {
       "title": "<exact title>",
       "url": "<distinct posting URL, or pageURL#anchor>",
-      "location": "<location text as stated, or empty>",
+      "location": "<location text as stated, resolved to a city if only a street address was given (see filter 6), or empty>",
       "experienceLiteral": "<verbatim level word or years phrase, or empty>",
       "techMentions": ["<free-text technologies the posting names>"],
       "levelJudgment": "junior" | "medior" | "diákmunka",
