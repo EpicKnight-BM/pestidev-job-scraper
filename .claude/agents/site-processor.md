@@ -279,7 +279,21 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    same apply target, no way to tell which role you would be applying to). Confirmed miss
    (2026-08-01): electronholding.com/careers#positions lists multiple distinct, individually
    anchored roles — "AI Integration Specialist (junior)" and "Alkalmazásüzemeltető" were both
-   missed even though each was its own distinguishable card.
+   missed even though each was its own distinguishable card. **The opposite mistake also happens:
+   the SAME real opening listed under several separate, fully-distinct URLs on one company's own
+   listing page** — not query-string variants, not in-page anchors, genuinely separate pages (e.g.
+   numbered slug siblings like `/java-developer/`, `/java-developer-2/`, `/java-developer-3/`).
+   This is not several openings, it is one opening re-listed. When two or more entries on the SAME
+   listing page share the same title and company and, as far as you can tell, the same
+   description/requirements, treat them as ONE posting: return only the first/lowest-numbered one
+   and skip the rest, even though each has its own genuinely working URL. This is specifically a
+   SAME-RUN problem — the `knownActiveTitles` check above only protects against re-finding a title
+   across SEPARATE runs (it is populated from the DB before this run starts), it does nothing for
+   duplicate entries discovered together in ONE enumeration pass, so you have to catch it yourself
+   while enumerating the listing, before returning findings. Confirmed case (2026-07-29):
+   innoview.hu/en/allas/java-developer/ and its numbered siblings `-2`/`-3`/`-4` were all the
+   identical "Java Developer" opening — all four got returned as separate findings in a single run,
+   creating four duplicate rows on the board.
 2. **Server-rendered HTML** — the description text must be visible without JavaScript. If a fetch
    returns only a title/nav shell with no real body text, reject it and move on; do not retry the
    same URL. (But try the sitemap fallback above before concluding a whole company is unreachable.)
