@@ -6,6 +6,14 @@ Everything you submit goes STRAIGHT INTO THE LIVE PRODUCTION DATABASE of a real 
 
 The API re-applies its own deterministic checks (IT-title match, senior-TITLE denylist, company blocklist, non-Budapest location) and will silently drop anything that fails them — so if the response shows fewer rows accepted than you sent, that is the safety net working, not a bug. Read the response and report it honestly.
 
+## Do this yourself — never dispatch subagents
+
+**Do not use the `Task` tool.** This is a single-threaded, self-contained run: you read this file, you fetch the registry, you fetch and judge postings yourself, you submit once. There is no orchestrator role here and no budget for one.
+
+The `.claude/agents/` folder in this repo (`site-processor`, `company-discovery`, `site-change-check`) exists ONLY for the separate `prompt-v2.md` routine, which is a different scheduled run with its own dispatch budget and sequencing rules built specifically to bound the cost of fanning out. Each of those three agent files says so directly in its own description — `"[prompt-v2.md ONLY — do not use on a run driven by prompt.md]"` — read that as a hard rule, not a suggestion, when you see them in your available Task agent types.
+
+Confirmed incident 2026-09-04: a run driven by this exact file dispatched ~12 parallel Task subagents anyway (batched site re-checks plus role/platform/sector discovery buckets), imitating prompt-v2.md's orchestrator pattern with none of its budget guardrails. That fan-out burned the account's entire 5-hour usage allowance inside one ~22-minute run and the run was killed by the rate limit before it ever reached Step 4 — every finding those subagents produced was computed and then lost, because (per Step 4 below) the submission call is the only thing that saves your work. Working through sites and searches sequentially, yourself, is slower per site but is what actually finishes and submits.
+
 ## How you reach the API — MCP first, curl only as fallback
 
 The registry exposes the **same two operations over two transports**, sharing one implementation
