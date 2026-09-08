@@ -336,18 +336,29 @@ With remaining budget:
    missing, its candidates were not de-duplicated** — check the file was written and re-dispatch,
    rather than spending your own turns re-checking its output against the registry by hand.
 2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
-   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing twice
-   (2026-08-24 and 2026-08-26); both runs were saved only because the orchestrator noticed and
-   asked again, and a run that accepts the empty result silently loses the whole discovery step.
-   When the agent completes with no `candidates` array, or its reply ends mid-sentence:
-   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent rewrites that file with
-     its full candidate list every time it confirms one, precisely so a cutoff cannot destroy
-     them. It holds a plain JSON array in the same shape as the agent's `candidates` field, and
-     the entries are usable as-is — they have already passed the agent's de-duplication. If the
-     file is missing, treat it as empty and move to the next bullet rather than stopping.
-   - **Then `SendMessage` the agent** telling it to stop searching immediately and return its JSON
-     right now with whatever it already has. Its `maxTurns` budget is per-invocation, so a resumed
-     agent gets room to write up. Use whichever list is longer, the file or the reply.
+   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing THREE times
+   now (2026-08-24, 2026-08-26, and 2026-09-08); every one of those runs was saved only because the
+   orchestrator noticed and recovered it, and a run that accepts the empty result silently loses
+   the whole discovery step. When the agent completes with no `candidates` array, or its reply ends
+   mid-sentence:
+   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent checkpoints its full
+     progress there after EVERY query — not only when a candidate passes — so the file is written
+     even on a genuinely dry stretch (confirmed 2026-09-08: a run whose every hit was already known
+     found the file missing under the old candidates-only checkpoint, because nothing had ever
+     passed to trigger a write). It holds a JSON object with `bucketsUsed`, `candidates`,
+     `checkedAgainst`, `droppedAsKnown`, `droppedAsExcluded` and `inProgress: true` — the
+     `candidates` entries are usable as-is, already de-duplicated. If the file is missing, treat it
+     as empty progress and move to the next bullet rather than stopping.
+   - **Resume the SAME agent with `SendMessage`, addressed to the agent ID the original dispatch
+     returned — never `Agent` and never `ScheduleWakeup`.** Confirmed 2026-09-08: the orchestrator
+     first called `ScheduleWakeup` (that tool schedules the orchestrator's own next wakeup, not a
+     subagent resume, and errored immediately) and then called `Agent` again, which spawns a brand
+     new agent with zero memory of the discovery run in progress — a wasted dispatch that had to be
+     discarded before the real recovery could happen. `SendMessage` is the only tool that continues
+     the original agent's own context; tell it to stop searching immediately and return its JSON
+     right now with whatever it already has (merging in the checkpoint file's progress if the file
+     has more than its own memory does). Its `maxTurns` budget is per-invocation, so a resumed agent
+     gets fresh room to write up.
    - Only after both come back empty should you conclude the run genuinely found no candidates,
      and say so plainly in your final report along with the fact that the agent was cut off.
 3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
