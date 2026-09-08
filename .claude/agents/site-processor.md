@@ -369,29 +369,20 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    the physical POST-OFFICE BRANCH network, not IT networking. Read enough of the body to confirm
    the role is actually about computers/software/IT infrastructure before returning it.
    **The API re-checks this filter on the TITLE ALONE, so a title with no recognisable IT word gets
-   dropped no matter how IT-relevant the body is.** Confirmed 2026-08-24: "Közmű SAP szakértő" at
-   MVM Informatika Zrt. was returned as a finding — defensible on the body, which is SAP IS-U
-   application support inside the group's IT company — and the API's `skippedNonIt` check discarded
-   it, because "közmű szakértő" (utility specialist) carries no IT token. Confirmed again 2026-09-08:
-   "Szoftverüzemeltető" (software operator) at Direktor Szoftver Kft. was submitted and bounced the
-   same way — "szoftver" alone is not one of the recognised tokens, and "üzemeltető" (operator) isn't
-   either, even though the role is unambiguously IT ops on the body. See **Known API-rejected title
-   shapes** below for the growing list of confirmed cases — check a borderline title against it
-   before spending a detail-page read on the posting.
+   dropped no matter how IT-relevant the body is.** `check_titles` (Step B.5) already checks this
+   authoritatively — a title that got `verdict: "keep"` there needs no further guessing here.
 
-   When a role reads IT from the body but its title is a domain/business/ops word with no
-   developer / engineer / fejlesztő / tester / tesztelő / QA / DevOps / rendszergazda / adatbázis /
-   analyst / rendszerszervező -style token in it, **set `titleApiRisk: true` on the finding and say
-   why in `why`.** Still return it — the backstop in filter 5/6 elsewhere is not this filter's job,
-   and a title-risk finding is sometimes still worth the budget slot — but the flag is what lets the
-   orchestrator spend budget on safer findings first when budget is tight, and it is what makes the
-   API's actual skip reason traceable back to a specific title afterward instead of getting lost in
-   an aggregate count.
+   **Fallback only** (`check_titles` was unreachable/errored, or this posting never went through it):
+   guess from the same word list — developer / engineer / fejlesztő / tester / tesztelő / QA / DevOps
+   / rendszergazda / adatbázis / analyst / rendszerszervező. No match despite an IT-relevant body →
+   set `titleApiRisk: true` on the finding and say why in `why`; still return it, but the flag lets
+   the orchestrator deprioritize it under a tight budget and trace a later `skippedNonIt` back to it.
+   Confirmed misses: 2026-08-24 "Közmű SAP szakértő" (MVM Informatika Zrt.) and 2026-09-08
+   "Szoftverüzemeltető" (Direktor Szoftver Kft.) — see **Known API-rejected title shapes** below.
 
-   ### Known API-rejected title shapes — check before spending a fetch on a borderline title
+   ### Known API-rejected title shapes (`check_titles`-fallback only)
 
-   Titles confirmed to have carried IT-relevant BODY content but still been dropped by the API's
-   title-only `skippedNonIt` check, because the title's head noun isn't a recognised token:
+   Confirmed titles with IT-relevant bodies that still failed the title-only `skippedNonIt` check:
 
    - **"Közmű SAP szakértő"** (2026-08-24, MVM Informatika Zrt.) — "közmű szakértő" (utility
      specialist) has no IT token even though the body is SAP IS-U application support.
@@ -496,7 +487,7 @@ is correct and normal.
       "experienceLiteral": "<verbatim level word or years phrase, or empty>",
       "techMentions": ["<free-text technologies the posting names>"],
       "levelJudgment": "junior" | "medior" | "diákmunka",
-      "titleApiRisk": <true only when the title itself carries no recognised IT token per filter 3 — omit or false otherwise>,
+      "titleApiRisk": <true only on the check_titles-fallback path, per filter 3 — omit or false otherwise>,
       "why": "<one line: why this passed filter 5. If titleApiRisk is true, also say which recognised token is missing.>"
     }
   ],
