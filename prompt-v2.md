@@ -458,6 +458,15 @@ Field rules:
 - `technologies` — comma-joined canonical labels from your mapping above.
 - `sitesChecked` — every company touched this run (new or re-checked), including ones with no fit. This advances `lastChecked`.
 - `listingUrls` (inside each `sitesChecked[slug]` entry) — the CURRENT full set of distinct posting URLs on that site's listing, from whichever agent last saw it, regardless of whether each qualified. Sending only new/submitted URLs breaks the skip-if-unchanged logic for that site.
+- `titleApiRisk` (on a `site-processor` finding, NOT a field the API accepts) — never forward this
+  into the submission payload; it is orchestrator-only signal. It marks a finding whose title itself
+  carries no token the API's `skippedNonIt` check recognises (see site-processor's "Known
+  API-rejected title shapes"), even though the agent judged the body genuinely IT-relevant. Two uses:
+  (1) if you ever have to trim a site-processor's findings to fit the remaining upload budget, drop
+  `titleApiRisk: true` findings before non-flagged ones — they are the most likely to cost a budget
+  slot for nothing; (2) after submission, correlate it against the response (see "What the API can
+  return" below) so a `skippedNonIt` count traces back to a specific title in your final report
+  instead of staying an anonymous number.
 - `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests), i.e. agents that returned `reject_permanent`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
@@ -480,6 +489,15 @@ different wrapper:
   dead `AI_INGEST_TOKEN` — they are different credentials and rotating the wrong one fixes nothing.
 
 - **200** — success. Body has `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` / `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` means a senior TITLE the API's denylist caught; `skippedLocation` means the API's location backstop caught a posting whose `location` text named somewhere other than Budapest unambiguously — if this is non-zero for a posting the agent thought ambiguous, treat it as a signal to write a clearer `location` next time, not as a bug.
+  **If `skippedNonIt` is non-zero, attribute it before moving on** — the API gives you only a count,
+  not which row. Match it against any finding you submitted with `titleApiRisk: true`: if the count
+  of flagged findings you sent equals `skippedNonIt`, that IS the attribution (say so plainly, by
+  title, in your final report). If it's ambiguous (more flagged findings sent than `skippedNonIt`,
+  or `skippedNonIt` is non-zero with none flagged), say that plainly instead of guessing — an honest
+  "couldn't attribute" beats a confident wrong guess. Either way, a non-zero `skippedNonIt` is the
+  signal that a title-shape belongs in site-processor.md's "Known API-rejected title shapes" list;
+  name the candidate title in your report so a human can add it, the same way "Közmű SAP szakértő"
+  and "Szoftverüzemeltető" got added.
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — more than 100 findings in one request; you should never be near this.
 - **401** — token invalid. STOP immediately and report.
@@ -510,6 +528,8 @@ API problem apart from a connector that never loaded, so never omit it and never
 Then a short plain-text summary. For EVERY site touched this run (re-check or new discovery), state **"found N postings, M IT-relevant, K passed the level filter, submitted J"** — these come straight from each `site-processor`'s `postingsFound` / `itRelevant` / `passedLevel` fields. A site entry with no N is an incomplete check; say so plainly rather than omitting it. A `site-change-check` that returned `changed: false` reports as "unchanged, N URLs on listing, 0 opened".
 
 Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — the HTTP status, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
+
+If `skippedNonIt` or `skippedSenior` came back non-zero, give it its own line — name the specific title(s) you attributed it to (per the attribution rule above), and if it's a new title shape not already in site-processor.md's "Known API-rejected title shapes" list, say plainly that it's worth adding. This is the only way that list grows — the API never tells anyone which row it dropped, only a human reading this report does.
 
 If the POST failed for any reason, say so explicitly and prominently: that means this run saved nothing.
 
