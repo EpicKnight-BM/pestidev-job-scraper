@@ -38,12 +38,24 @@ arithmetic changes with the transport — only how the request leaves this sessi
 |---|---|---|
 | `get_registry` | Step 1's GET | none — `{}` |
 | `submit_findings` | Step 4's POST | `{ findings, sitesChecked, rejected }` — the exact same JSON body the POST took |
+| `check_titles` | (new, no REST equivalent) | `{ candidates: [{title, company}] }` — read-only title pre-check, see below |
 
 This repo's `.mcp.json` registers the server under the name **`pestidev`**, so the tools appear as
-`mcp__pestidev__get_registry` and `mcp__pestidev__submit_findings`, and both are pre-approved in
-`.claude/settings.json`. If the connector was registered on the environment under a different name,
-the prefix differs but the tool's own name does not — match on `get_registry` / `submit_findings`
-and use whatever prefix your tool list actually shows.
+`mcp__pestidev__get_registry`, `mcp__pestidev__submit_findings` and `mcp__pestidev__check_titles`,
+and all three are pre-approved in `.claude/settings.json`. If the connector was registered on the
+environment under a different name, the prefix differs but the tool's own name does not — match on
+`get_registry` / `submit_findings` / `check_titles` and use whatever prefix your tool list actually
+shows.
+
+**`check_titles` is different from the other two: `site-processor` can call it too.** It is the one
+deliberate exception to "no subagent ever gets either transport" below — it is read-only, costs no
+upload budget, and cannot submit or write anything, so it is in `site-processor`'s own `tools:`
+frontmatter (see that agent's Step B.5). You (the orchestrator) never call it yourself; it exists so
+`site-processor` can drop a title that would bounce at `submit_findings` time — not IT-relevant per
+the live `job_categories` keywords, or a cross-source duplicate — BEFORE spending a detail-page fetch
+on it, using the exact same gates the API applies at insert time. There is no REST fallback for it;
+if the MCP connector is not registered, `site-processor` simply skips this pre-check and falls
+through to evaluating every posting itself, same as before it existed.
 
 `get_registry` returns the registry snapshot as JSON text in its result content — the identical
 object the GET wrote to `registry.json`. `submit_findings` returns the identical `{ok, ingested,
@@ -75,9 +87,13 @@ An MCP result with `isError: true` is the API rejecting your request, not the tr
 Its text carries the same `too_many_rows` / `rate_limited` details the REST 413 / 429 responses do —
 handle it with the Step 4 response rules, and never retry it in a loop.
 
-**No subagent ever gets either transport.** The agents in `.claude/agents/` have no MCP tools in
-their frontmatter and no credential, so they structurally cannot reach the registry. You make every
-registry call in this run, on whichever transport you chose above.
+**No subagent ever gets `get_registry` or `submit_findings`.** The agents in `.claude/agents/` have
+neither of those two in their frontmatter and no credential for the REST fallback, so they
+structurally cannot read or write the registry. You make every `get_registry` / `submit_findings`
+call in this run, on whichever transport you chose above. **`check_titles` is the one exception** —
+`site-processor` has it in its own `tools:` frontmatter, deliberately, because it is read-only and
+spends no budget. You never call `check_titles` yourself; it is `site-processor`'s own pre-fetch
+filter, not part of your Step 1/Step 4 workflow.
 
 ## Authentication — for the curl fallback only
 
