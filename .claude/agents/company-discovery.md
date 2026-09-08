@@ -257,28 +257,53 @@ So:
   stopped early. A short honest list beats a long one that never arrives.
 - Never spend a turn on a search you cannot afford to write up.
 
-## Checkpoint every candidate to disk the moment you confirm it
+## Checkpoint progress to disk after every query, not just when a candidate passes
 
-Do not hold candidates only in your own context — you cannot emit them if you are cut off. Every
-time a candidate passes your domain check, **use the `Write` tool** to save the complete list you
-have so far to this exact path:
+Do not hold progress only in your own context — you cannot emit it if you are cut off. Confirmed
+2026-09-08: a run spent ~15 queries across all three buckets and every single hit was already
+known, so no candidate ever passed the domain check — the old candidates-only checkpoint therefore
+never fired, the file stayed missing the whole run, and the orchestrator's recovery step found
+nothing to read even though the agent had genuinely done ~15 queries' worth of work. A dry run is a
+real result and deserves a checkpoint exactly as much as a productive one does.
+
+**After every query you run — whether it produced a passing candidate or not — use the `Write`
+tool** to save your full progress state so far to this exact path:
 
     /tmp/pestidev-discovery-candidates.json
 
-- The content is just the `candidates` array from the schema below — a JSON array of the objects
-  you would return, and nothing else.
-- **Write the WHOLE array every time, replacing the file.** That is one cheap tool call, it keeps
-  the file valid JSON at every instant, and the first write of the run overwrites any rows a
-  previous run left behind in the same sandbox.
+The content is a JSON object, not a bare array:
+
+```json
+{
+  "bucketsUsed": ["role:tesztautomatizálási mérnök", "platform:join.com"],
+  "candidates": [ /* the candidate objects confirmed so far, per the return schema */ ],
+  "checkedAgainst": 2315,
+  "droppedAsKnown": 12,
+  "droppedAsExcluded": 3,
+  "inProgress": true
+}
+```
+
+- **Write the WHOLE object every time, replacing the file.** One cheap tool call, keeps the file
+  valid JSON at every instant, and the first write of the run overwrites anything a previous run
+  left behind in the same sandbox.
+- Update it after EACH query completes — append the query to `bucketsUsed`, fold its hits into
+  `droppedAsKnown`/`droppedAsExcluded`/`candidates` as they resolve — not only when something
+  passes. A checkpoint that only records successes is silent exactly when you need it most: a long
+  dry stretch.
 - Do it BEFORE your next search, not at the end. A checkpoint you were about to write is worth
   exactly as much as one you never wrote.
 - Use `Write`, not a shell redirect. Bash permissions here match on literal command prefix, so an
   improvised `echo`/`printf`/`cat` redirect falls through to the auto-mode classifier and may be
   refused mid-run — which would silently defeat the whole point of checkpointing.
+- Set `"inProgress": true` on every checkpoint write. Your actual final reply omits that field
+  entirely (see the return schema below) — its presence in the file is how the orchestrator tells
+  a mid-run checkpoint apart from a completed-but-unread one.
 - Still return the full JSON below as your actual answer. The file is a safety net, not the
   deliverable, and the orchestrator reads it only if your reply never arrives.
 
-A checkpointed candidate survives a mid-sentence cutoff. One held in your head does not.
+A checkpointed dry query survives a mid-sentence cutoff exactly like a checkpointed candidate does.
+One held only in your head does not.
 
 ## Return exactly this JSON, nothing else
 

@@ -316,12 +316,38 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    dropped no matter how IT-relevant the body is.** Confirmed 2026-08-24: "Közmű SAP szakértő" at
    MVM Informatika Zrt. was returned as a finding — defensible on the body, which is SAP IS-U
    application support inside the group's IT company — and the API's `skippedNonIt` check discarded
-   it, because "közmű szakértő" (utility specialist) carries no IT token. When a role reads IT from
-   the body but its title is a domain/business word with no developer / engineer / fejlesztő /
-   tester / tesztelő / QA / DevOps / rendszergazda / adatbázis / analyst / rendszerszervező -style
-   token in it, expect the API to drop it. Returning it anyway is not a disaster — the backstop
-   catches it — but it costs a detail-page read and a budget slot, so weigh whether the title
-   genuinely carries an IT signal before spending one on it.
+   it, because "közmű szakértő" (utility specialist) carries no IT token. Confirmed again 2026-09-08:
+   "Szoftverüzemeltető" (software operator) at Direktor Szoftver Kft. was submitted and bounced the
+   same way — "szoftver" alone is not one of the recognised tokens, and "üzemeltető" (operator) isn't
+   either, even though the role is unambiguously IT ops on the body. See **Known API-rejected title
+   shapes** below for the growing list of confirmed cases — check a borderline title against it
+   before spending a detail-page read on the posting.
+
+   When a role reads IT from the body but its title is a domain/business/ops word with no
+   developer / engineer / fejlesztő / tester / tesztelő / QA / DevOps / rendszergazda / adatbázis /
+   analyst / rendszerszervező -style token in it, **set `titleApiRisk: true` on the finding and say
+   why in `why`.** Still return it — the backstop in filter 5/6 elsewhere is not this filter's job,
+   and a title-risk finding is sometimes still worth the budget slot — but the flag is what lets the
+   orchestrator spend budget on safer findings first when budget is tight, and it is what makes the
+   API's actual skip reason traceable back to a specific title afterward instead of getting lost in
+   an aggregate count.
+
+   ### Known API-rejected title shapes — check before spending a fetch on a borderline title
+
+   Titles confirmed to have carried IT-relevant BODY content but still been dropped by the API's
+   title-only `skippedNonIt` check, because the title's head noun isn't a recognised token:
+
+   - **"Közmű SAP szakértő"** (2026-08-24, MVM Informatika Zrt.) — "közmű szakértő" (utility
+     specialist) has no IT token even though the body is SAP IS-U application support.
+   - **"Szoftverüzemeltető"** (2026-09-08, Direktor Szoftver Kft.) — "üzemeltető" (operator) alone
+     isn't recognised; neither is "szoftver" alone. The same shape applies to any `<noun> +
+     üzemeltető` title (e.g. "Rendszerüzemeltető", "Alkalmazásüzemeltető") unless the noun itself is
+     one of the recognised tokens (e.g. "rendszergazda" already covers "rendszer-" compounds built
+     on THAT word specifically, not on "üzemeltető").
+
+   A new confirmed case belongs in this list, not just in a run's own `note` — that is what lets the
+   NEXT run's judgment call benefit from this one's, instead of every run rediscovering the same
+   pattern from scratch.
 4. **Title carries no senior/lead/management word** — reject any title containing Senior, Lead,
    Vezető, Manager, Owner (e.g. "Product Owner"), Igazgató, Head of, Chief, Principal, or Architect.
 5. **Level is JUNIOR, MEDIOR, or INTERN/entry-level — NEVER senior.** Judge from title AND body
@@ -414,7 +440,8 @@ is correct and normal.
       "experienceLiteral": "<verbatim level word or years phrase, or empty>",
       "techMentions": ["<free-text technologies the posting names>"],
       "levelJudgment": "junior" | "medior" | "diákmunka",
-      "why": "<one line: why this passed filter 5>"
+      "titleApiRisk": <true only when the title itself carries no recognised IT token per filter 3 — omit or false otherwise>,
+      "why": "<one line: why this passed filter 5. If titleApiRisk is true, also say which recognised token is missing.>"
     }
   ],
   "rejectReason": "<only when status is reject_permanent — why this site can NEVER work>",

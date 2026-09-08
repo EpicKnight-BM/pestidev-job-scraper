@@ -336,18 +336,29 @@ With remaining budget:
    missing, its candidates were not de-duplicated** — check the file was written and re-dispatch,
    rather than spending your own turns re-checking its output against the registry by hand.
 2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
-   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing twice
-   (2026-08-24 and 2026-08-26); both runs were saved only because the orchestrator noticed and
-   asked again, and a run that accepts the empty result silently loses the whole discovery step.
-   When the agent completes with no `candidates` array, or its reply ends mid-sentence:
-   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent rewrites that file with
-     its full candidate list every time it confirms one, precisely so a cutoff cannot destroy
-     them. It holds a plain JSON array in the same shape as the agent's `candidates` field, and
-     the entries are usable as-is — they have already passed the agent's de-duplication. If the
-     file is missing, treat it as empty and move to the next bullet rather than stopping.
-   - **Then `SendMessage` the agent** telling it to stop searching immediately and return its JSON
-     right now with whatever it already has. Its `maxTurns` budget is per-invocation, so a resumed
-     agent gets room to write up. Use whichever list is longer, the file or the reply.
+   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing THREE times
+   now (2026-08-24, 2026-08-26, and 2026-09-08); every one of those runs was saved only because the
+   orchestrator noticed and recovered it, and a run that accepts the empty result silently loses
+   the whole discovery step. When the agent completes with no `candidates` array, or its reply ends
+   mid-sentence:
+   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent checkpoints its full
+     progress there after EVERY query — not only when a candidate passes — so the file is written
+     even on a genuinely dry stretch (confirmed 2026-09-08: a run whose every hit was already known
+     found the file missing under the old candidates-only checkpoint, because nothing had ever
+     passed to trigger a write). It holds a JSON object with `bucketsUsed`, `candidates`,
+     `checkedAgainst`, `droppedAsKnown`, `droppedAsExcluded` and `inProgress: true` — the
+     `candidates` entries are usable as-is, already de-duplicated. If the file is missing, treat it
+     as empty progress and move to the next bullet rather than stopping.
+   - **Resume the SAME agent with `SendMessage`, addressed to the agent ID the original dispatch
+     returned — never `Agent` and never `ScheduleWakeup`.** Confirmed 2026-09-08: the orchestrator
+     first called `ScheduleWakeup` (that tool schedules the orchestrator's own next wakeup, not a
+     subagent resume, and errored immediately) and then called `Agent` again, which spawns a brand
+     new agent with zero memory of the discovery run in progress — a wasted dispatch that had to be
+     discarded before the real recovery could happen. `SendMessage` is the only tool that continues
+     the original agent's own context; tell it to stop searching immediately and return its JSON
+     right now with whatever it already has (merging in the checkpoint file's progress if the file
+     has more than its own memory does). Its `maxTurns` budget is per-invocation, so a resumed agent
+     gets fresh room to write up.
    - Only after both come back empty should you conclude the run genuinely found no candidates,
      and say so plainly in your final report along with the fact that the agent was cut off.
 3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
@@ -447,6 +458,15 @@ Field rules:
 - `technologies` — comma-joined canonical labels from your mapping above.
 - `sitesChecked` — every company touched this run (new or re-checked), including ones with no fit. This advances `lastChecked`.
 - `listingUrls` (inside each `sitesChecked[slug]` entry) — the CURRENT full set of distinct posting URLs on that site's listing, from whichever agent last saw it, regardless of whether each qualified. Sending only new/submitted URLs breaks the skip-if-unchanged logic for that site.
+- `titleApiRisk` (on a `site-processor` finding, NOT a field the API accepts) — never forward this
+  into the submission payload; it is orchestrator-only signal. It marks a finding whose title itself
+  carries no token the API's `skippedNonIt` check recognises (see site-processor's "Known
+  API-rejected title shapes"), even though the agent judged the body genuinely IT-relevant. Two uses:
+  (1) if you ever have to trim a site-processor's findings to fit the remaining upload budget, drop
+  `titleApiRisk: true` findings before non-flagged ones — they are the most likely to cost a budget
+  slot for nothing; (2) after submission, correlate it against the response (see "What the API can
+  return" below) so a `skippedNonIt` count traces back to a specific title in your final report
+  instead of staying an anonymous number.
 - `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests), i.e. agents that returned `reject_permanent`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
@@ -469,6 +489,15 @@ different wrapper:
   dead `AI_INGEST_TOKEN` — they are different credentials and rotating the wrong one fixes nothing.
 
 - **200** — success. Body has `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` / `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` means a senior TITLE the API's denylist caught; `skippedLocation` means the API's location backstop caught a posting whose `location` text named somewhere other than Budapest unambiguously — if this is non-zero for a posting the agent thought ambiguous, treat it as a signal to write a clearer `location` next time, not as a bug.
+  **If `skippedNonIt` is non-zero, attribute it before moving on** — the API gives you only a count,
+  not which row. Match it against any finding you submitted with `titleApiRisk: true`: if the count
+  of flagged findings you sent equals `skippedNonIt`, that IS the attribution (say so plainly, by
+  title, in your final report). If it's ambiguous (more flagged findings sent than `skippedNonIt`,
+  or `skippedNonIt` is non-zero with none flagged), say that plainly instead of guessing — an honest
+  "couldn't attribute" beats a confident wrong guess. Either way, a non-zero `skippedNonIt` is the
+  signal that a title-shape belongs in site-processor.md's "Known API-rejected title shapes" list;
+  name the candidate title in your report so a human can add it, the same way "Közmű SAP szakértő"
+  and "Szoftverüzemeltető" got added.
 - **429 Rate limit exceeded** — hourly budget used up. Should not happen if you followed the budget rule. Do NOT retry in a loop. Report it and end the run; unsent findings are re-found later.
 - **413 Too many findings** — more than 100 findings in one request; you should never be near this.
 - **401** — token invalid. STOP immediately and report.
@@ -499,6 +528,8 @@ API problem apart from a connector that never loaded, so never omit it and never
 Then a short plain-text summary. For EVERY site touched this run (re-check or new discovery), state **"found N postings, M IT-relevant, K passed the level filter, submitted J"** — these come straight from each `site-processor`'s `postingsFound` / `itRelevant` / `passedLevel` fields. A site entry with no N is an incomplete check; say so plainly rather than omitting it. A `site-change-check` that returned `changed: false` reports as "unchanged, N URLs on listing, 0 opened".
 
 Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — the HTTP status, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
+
+If `skippedNonIt` or `skippedSenior` came back non-zero, give it its own line — name the specific title(s) you attributed it to (per the attribution rule above), and if it's a new title shape not already in site-processor.md's "Known API-rejected title shapes" list, say plainly that it's worth adding. This is the only way that list grows — the API never tells anyone which row it dropped, only a human reading this report does.
 
 If the POST failed for any reason, say so explicitly and prominently: that means this run saved nothing.
 
