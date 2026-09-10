@@ -20,11 +20,16 @@ endpoint, and never go looking for a token.
 ## Your input
 
 - `knownDomainsFile` — PATH to a file, one entry per line, holding every domain already in the
-  registry's `sites` PLUS every permanently-rejected company/site. This is `knownDomains` and
-  `permanentlyRejected` combined; everywhere below that says "in `knownDomains`" means "a line in
-  this file". You are given a path rather than the list itself because the list is ~900 lines and
-  pasting it inline is what caused it to be dropped from the dispatch entirely — see
-  **Load the file FIRST** below.
+  registry's `sites` PLUS every `permanentlyRejected[].domain` value (falling back to `.slug` for
+  the rare entry with no domain). This is `knownDomains` and `permanentlyRejected` combined;
+  everywhere below that says "in `knownDomains`" means "a line in this file". You are given a path
+  rather than the list itself because the list is ~900 lines and pasting it inline is what caused it
+  to be dropped from the dispatch entirely — see **Load the file FIRST** below. **Each line is a
+  bare domain or slug now, never a sentence** (2026-09-10: `permanentlyRejected` used to be a
+  free-text `"Company (domain) — reason"` string, and a line built from that whole string would
+  never `grep -qxF`-match a candidate's bare domain — the exact-match check below only started
+  working reliably for rejected companies once the registry moved to structured
+  `{slug, domain, company, reason}` records).
 - `wanted` — how many fresh candidates the orchestrator wants back
 - `recentBuckets` — optional; which query buckets recent runs already used, so you can rotate away
 
