@@ -97,7 +97,7 @@ timeout 40 curl -sS --connect-timeout 10 --max-time 30 -H "Authorization: Bearer
 
 Either way the response gives you:
 - `sites` — every career page you have ever checked, each with `lastChecked`, `status`, and (once you've checked it at least once under this rule) `listingUrls` — the exact set of posting URLs you saw on its listing last time. `listingUrls` is what makes Step 2 cheap: it's how you tell whether the page changed at all since last visit, without re-reading anything.
-- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing. Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: skip it outright, fetch nothing for it, and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
+- `permanentlyRejected` — companies/sites that can NEVER work regardless of timing, as `{slug, domain, company, reason}` records (2026-09-10: moved from a free-text `"Company (domain) — reason"` string to this structured shape specifically so a company can be matched by its exact `slug` or `domain` field instead of parsed out of a sentence — do the same when you send new entries under `rejected`, see Step 4's field rules). Never re-check these. **This list OUTRANKS `sites`.** When a company is in both, `permanentlyRejected` wins: skip it outright, fetch nothing for it, and never send a `sitesChecked` entry that would refresh it. See the priority rule at the top of Step 2.
 - `knownUrls` — job URLs you have already successfully submitted. Never submit these again.
 - `activeTitlesByCompany` — **added 2026-09-02.** A map from a normalized company name to the normalized titles of every posting currently ACTIVE in the live database for that company, across EVERY source — not just this routine's own past finds, but every hand scraper and `ats-crawl` too. This is the same (company, title) match the API itself uses to reject a duplicate on submission (`_ai_dupe_guard.mjs`) — the difference is you get it BEFORE spending a detail-page fetch and a filter judgment on a posting that would be rejected anyway. See "Skip postings the database already has" below for how to use it — the keys and values are normalized in a specific way that you must reproduce exactly, or a real match will silently miss.
 - `uploadBudget` — `{ remaining, limit, resetInSeconds }`. **`remaining` is the MAXIMUM number of job postings you can upload this run** (hard cap, default 10/hour, bounds the damage if the token leaks). See the budget rule below.
@@ -184,9 +184,12 @@ Fall back to WebFetch ONLY when you genuinely need rendered content curl cannot 
 ### ⚠ FIRST, before any fetch — drop permanently-rejected sites out of the re-check list ★
 
 `permanentlyRejected` OUTRANKS `sites`. Build your Step 2 work list by taking the aged entries in
-`sites` and REMOVING every one whose company, domain or slug appears in `permanentlyRejected` or in
-the STRICT exclusion list below. Match on the bare domain/company, not the exact URL —
-`nixstech.com`, "NIX Hungary Kft." and `sites["nixstech"]` are all the same excluded thing.
+`sites` and REMOVING every one whose slug key matches a `permanentlyRejected[].slug`, or whose site
+`url` domain matches a `permanentlyRejected[].domain`, or whose company name matches a
+`permanentlyRejected[].company` — three exact structured-field comparisons now, not text-parsing
+(2026-09-10: `permanentlyRejected` moved off free text for exactly this). Also check the STRICT
+exclusion list below. `nixstech.com`, "NIX Hungary Kft." and `sites["nixstech"]` are all the same
+excluded thing — they should share one `slug`.
 
 **Remove the `ats-crawl` hosts from that list as well** — any aged entry whose postings live on
 `jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`, `*.recruitee.com`,
@@ -256,7 +259,7 @@ With remaining budget, look for companies in NEITHER `sites` NOR `permanentlyRej
 On those eight hosts ONLY:
 - **Never search them.** They are gone from the by-platform bucket above for this reason.
 - **Never investigate a candidate whose postings live there.** Skip it the moment you recognise the host — no listing fetch, no sitemap, no detail page, no counting. Same free skip as the known-broken platforms above, for the opposite reason: not "this can't be read" but "this is already being read, hourly, by something else".
-- **Retire the ones already in `sites`.** Send each ONE time under `rejected` with a reason that names the source (e.g. `"DATAPAO — job-boards.eu.greenhouse.io, covered by the board's own ats-crawl source"`), and never send a `sitesChecked` entry for it again. Once it is in `permanentlyRejected` it is out of the rotation for good, and re-sending it only piles up near-duplicate entries — the same rule as every other permanent rejection.
+- **Retire the ones already in `sites`.** Send each ONE time under `rejected` as a structured record naming the host (e.g. `{"slug":"datapao","domain":"job-boards.eu.greenhouse.io","company":"DATAPAO","reason":"covered by the board's own ats-crawl source"}`), and never send a `sitesChecked` entry for it again. Once it is in `permanentlyRejected` it is out of the rotation for good, and re-sending it only piles up near-duplicate entries — the same rule as every other permanent rejection.
 - **Judge by where the POSTING URL lives, not where the career page lives.** A company's own `/karrier` page that links out to a Greenhouse board is still the crawler's work: the URLs you would submit are `job-boards.greenhouse.io/...`, which is exactly what it already holds. The site is yours only when the posting URLs sit on the company's own domain.
 
 **The one known gap — recognise it, do not "fix" it.** The crawler only harvests slugs already in its `ats_tenants` table (seeded from ~64 companies, grown by a separate worker that derives slug guesses from company names ALREADY in the board's database), so a brand-new company on one of those eight platforms can sit uncrawled for a while. Closing that gap is a site-side job — the `ats-tenants` intake endpoint exists for exactly it — and is NOT a licence to hand-scrape the host anyway. Skipping these four is a deliberate division of labour, not an oversight for you to work around.
@@ -361,7 +364,7 @@ Submit everything from this run in ONE call. There is no git, no file to write, 
     "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
      "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
   },
-  "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+  "rejected": [{"slug":"somecorp","domain":"somecorp.hu","company":"SomeCorp","reason":"JS-rendered ATS, no per-job URLs"}]
 }
 ```
 
@@ -382,7 +385,7 @@ curl -sS -X POST -H "Authorization: Bearer $AI_INGEST_TOKEN" \
       "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
        "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
     },
-    "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+    "rejected": [{"slug":"somecorp","domain":"somecorp.hu","company":"SomeCorp","reason":"JS-rendered ATS, no per-job URLs"}]
   }'
 ```
 
@@ -399,7 +402,7 @@ Field rules:
   Only include a label from this list if the posting actually names it (or an obvious synonym — e.g. "Postgres" → PostgreSQL, "Node" → Node.js). If the posting's tech stack has NOTHING on this list (e.g. it only mentions SharePoint, Power Automate, Fortinet, specific network hardware, or non-technical tools), leave `technologies` empty/omit it entirely rather than writing an unrecognized label — an empty field is correct and normal, a made-up label is not. Don't pad the list with things not actually mentioned.
 - `sitesChecked` — every company you checked this run (new or re-checked), including ones with no fit. This advances `lastChecked`.
 - `listingUrls` (inside each `sitesChecked[slug]` entry) — the CURRENT full set of distinct posting URLs you saw on that site's listing page just now, regardless of whether each one qualified. Always include the complete set, not only new/submitted ones — this is what next run's Step 2 change-check diffs against, so leaving it out (or sending only new URLs) breaks the skip-if-unchanged logic for that site.
-- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests). Never put a site here just because it has no fit today — that belongs in `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
+- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests). Each entry is a structured object, not a sentence: `{"slug": "...", "domain": "...", "company": "...", "reason": "..."}`. **`slug` and `reason` are required.** Use the SAME slug you would use (or already used) for this company under `sites`/`findings` — that's what lets a future run match it exactly instead of re-parsing text. `domain`/`company` are informational (helps a human skim the list, and gives `company-discovery` something to match a brand-new candidate against before it has a slug) but never the match key. Never put a site here just because it has no fit today — that belongs in `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names its slug, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
 
