@@ -233,11 +233,12 @@ Stalling costs the POST — and a run that never POSTs produced nothing at all.
 
 ### ⚠ FIRST, before you dispatch anything — drop permanently-rejected sites out of the re-check list ★
 
-`permanentlyRejected` OUTRANKS `sites`. Build your Step 2 work list from the aged entries in
-`sites` and REMOVE every one whose company, domain or slug appears in `permanentlyRejected` or in
-the STRICT exclusion list in `.claude/agents/company-discovery.md`. Match on the bare
-domain/company, not the exact URL — `nixstech.com`, "NIX Hungary Kft." and `sites["nixstech"]` are
-all the same excluded thing.
+`permanentlyRejected` OUTRANKS `sites`. It is a `{slug, domain, company, reason}[]` array — build a
+Set of its `slug` values and REMOVE from your Step 2 work list every aged `sites` entry whose own
+key is in that Set (an exact lookup, not a text match — `sites["nixstech"]` drops the moment
+`nixstech` is in the Set). Also remove anything in the STRICT exclusion list in
+`.claude/agents/company-discovery.md`, matching on the bare domain/company there since that list has
+no slugs of its own.
 
 **Remove the `ats-crawl` hosts as well** — every aged entry whose postings live on
 `jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com`, `*.recruitee.com`,
@@ -340,8 +341,9 @@ With remaining budget:
    file's path as `knownDomainsFile`, plus how many candidates you want. It rotates across
    role/platform/sector query buckets and de-duplicates by domain before it returns anything.
 
-   Write one entry per line — every domain in `sites`, then every entry in `permanentlyRejected` —
-   to `/tmp/pestidev-known-domains.txt`, and pass that path. **Do not paste the list into the
+   Write one entry per line — every domain in `sites`, then each `permanentlyRejected` record's
+   `domain` (fall back to `company` when a record has no `domain`) — to
+   `/tmp/pestidev-known-domains.txt`, and pass that path. **Do not paste the list into the
    dispatch prompt.** It is ~900 lines, and an inline list that size is one the dispatch will drop
    under its own weight: confirmed 2026-09-02, when the list was omitted as "too large to hand the
    agent inline", the agent searched blind and 5 of its 6 candidates were already tracked or already
@@ -435,7 +437,7 @@ keys, the same shapes, exactly as documented below:
     "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
      "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
   },
-  "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+  "rejected": [{"slug":"somecorp","domain":"somecorp.hu","company":"SomeCorp","reason":"JS-rendered ATS, no per-job URLs"}]
 }
 ```
 
@@ -461,7 +463,7 @@ export AI_INGEST_TOKEN='<the token given in your run instruction>' && curl -sS -
       "flexinform": {"url":"https://www.flexinform.hu/karrier","company":"Flexinform Kft.","status":"has_opening",
        "listingUrls":["https://www.flexinform.hu/karrier/junior-php-fejleszto","https://www.flexinform.hu/karrier/backend-fejleszto"]}
     },
-    "rejected": ["SomeCorp — JS-rendered ATS, no per-job URLs"]
+    "rejected": [{"slug":"somecorp","domain":"somecorp.hu","company":"SomeCorp","reason":"JS-rendered ATS, no per-job URLs"}]
   }'
 ```
 
@@ -479,7 +481,7 @@ Field rules:
   fallback path (see site-processor's Step B.5 and "Known API-rejected title shapes"). If you have to
   trim findings to fit the remaining budget, drop `titleApiRisk: true` ones first — they are the most
   likely to cost a slot for nothing.
-- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests), i.e. agents that returned `reject_permanent`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names it, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
+- `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests), i.e. agents that returned `reject_permanent`. Send it as an array of `{"slug":..., "domain":..., "company":..., "reason":...}` objects — **never a free-text string; the API silently drops any `rejected` entry that isn't an object.** `slug` is required and must be the exact same slug you use in `sitesChecked`/`findings` for this company, since it's the only field `permanentlyRejected` is matched on. A `site-processor` `reject_permanent` result already gives you everything to build one: its `slug`/`company` pass through directly, `rejectReason` becomes `reason`, and `domain` is the hostname of its `listingUrl`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names that `slug`, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
 
