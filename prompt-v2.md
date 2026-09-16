@@ -58,7 +58,9 @@ through to evaluating every posting itself, same as before it existed.
 
 `get_registry` returns the registry snapshot as JSON text in its result content — the identical
 object the GET wrote to `registry.json`. `submit_findings` returns the identical `{ok, ingested,
-rateLimit, counts}` object the POST returned. Read them exactly as described in Steps 1 and 4.
+results, rateLimit, counts}` object the POST returned — `results` (added 2026-09-16, Andrssss/
+MyWebsite) is new: one entry per finding YOU submitted, so you can look up exactly what happened to
+a specific url instead of only seeing aggregate counts. Read them exactly as described in Steps 1 and 4.
 
 ### Before Step 1, check the connector is present
 
@@ -370,25 +372,33 @@ Field rules:
   into the submission payload; orchestrator-only signal, and only ever set on the `check_titles`
   fallback path (see site-processor's Step B.5 and "Known API-rejected title shapes"). If you have to
   trim findings to fit the remaining budget, drop `titleApiRisk: true` ones first — they are the most
-  likely to cost a slot for nothing.
+  likely to cost a slot for nothing. It still earns its keep for THIS: `results` (below) tells you
+  a submitted url bounced with `skipped_non_it`, but only `titleApiRisk` tells you, before you ever
+  submit, which findings were worth deprioritizing under a tight budget in the first place.
 - `rejected` — ONLY for sites that can never work regardless of timing (JS-rendered ATS, no per-job URL, wrong vertical, aggregator, already-covered domain, or a board the site's own `ats-crawl` source already harvests), i.e. agents that returned `reject_permanent`. Send it as an array of `{"slug":..., "domain":..., "company":..., "reason":...}` objects — **never a free-text string; the API silently drops any `rejected` entry that isn't an object.** `slug` is required and must be the exact same slug you use in `sitesChecked`/`findings` for this company, since it's the only field `permanentlyRejected` is matched on. A `site-processor` `reject_permanent` result already gives you everything to build one: its `slug`/`company` pass through directly, `rejectReason` becomes `reason`, and `domain` is the hostname of its `listingUrl`. Never put a site here because it has no fit today — that is `sitesChecked`. Entries here are permanent and never re-checked. **Send a site here the FIRST time you reject it permanently and never again** — if `permanentlyRejected` already names that `slug`, re-sending changes nothing and just accumulates near-duplicate entries for one company. And **never send the same company under both `sitesChecked` and `rejected`**: `sitesChecked` refreshes exactly what `rejected` is meant to retire, which is how a permanently-rejected site stays in rotation forever.
 
 All three keys are optional — send only what applies. Send `findings: []` on a run that found nothing, but still send `sitesChecked` so your re-check clock advances.
 
 ### What the API can return — handle each of these
 
-- A normal result whose text is `{ok:true, ingested, rateLimit, counts}` is success. Body has
-  `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` /
-  `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` means a senior TITLE the
-  API's denylist caught; `skippedLocation` means the API's location backstop caught a posting whose
-  `location` text named somewhere other than Budapest unambiguously — if this is non-zero for a
-  posting the agent thought ambiguous, treat it as a signal to write a clearer `location` next time,
-  not as a bug.
-  **If `skippedNonIt` is non-zero and you sent any `titleApiRisk: true` finding this call** (only
-  possible on the `check_titles`-fallback path), attribute it: if the flagged count equals
-  `skippedNonIt`, name that title in your final report as a candidate for site-processor.md's "Known
-  API-rejected title shapes" list, the same way "Közmű SAP szakértő" and "Szoftverüzemeltető" got
-  added. If ambiguous, say "couldn't attribute" rather than guessing.
+- A normal result whose text is `{ok:true, ingested, results, rateLimit, counts}` is success.
+  `ingested` has the aggregate per-source counts (`inserted` / `skippedSenior` / `skippedCompany` /
+  `skippedNonIt` / `skippedLocation`) — read it for the totals, but do NOT attribute a non-zero count
+  back to a specific title by guessing, or by counting `titleApiRisk: true` findings against it.
+  `results` is the exact answer: one `{url, title, slug, status, reason}` entry per finding you
+  submitted this call, `status` being one of `inserted`, `handed_to_ats`, `duplicate`,
+  `skipped_non_it`, `skipped_senior_title`, `skipped_senior_experience`, `skipped_location`,
+  `skipped_company`, `invalid` (malformed slug/title/url, or a duplicate url within your own batch),
+  or `throttled` (accepted by budget-check but not processed — will be re-found next run, do not
+  resubmit it). Look up a submitted url in `results` instead of guessing. `skippedSenior` in
+  `ingested` means a senior TITLE the API's denylist caught; `skippedLocation` means the API's
+  location backstop caught a posting whose `location` text named somewhere other than Budapest
+  unambiguously — if this is non-zero for a posting the agent thought ambiguous, treat it as a signal
+  to write a clearer `location` next time, not as a bug.
+  **If any `results` entry has `status: "skipped_non_it"`**, name that exact title in your final
+  report as a candidate for site-processor.md's "Known API-rejected title shapes" list, the same way
+  "Közmű SAP szakértő" and "Szoftverüzemeltető" got added. This is now a lookup, never a guess — there
+  is no more "couldn't attribute" case for a finding YOU submitted this call.
 - A result with `isError: true` is the API refusing your payload. Its text carries `too_many_rows`
   (with `max` / `received`) when you sent more than the API accepts in one request — you should
   never be near this if you followed the budget rule — or `rate_limited` (with `limit` /
@@ -428,7 +438,7 @@ Then a short plain-text summary. For EVERY site touched this run (re-check or ne
 
 Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — whether the tool result was `ok:true` or `isError`, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
 
-If `skippedNonIt` or `skippedSenior` came back non-zero, give it its own line — name the specific title(s) you attributed it to (per the attribution rule above), and if it's a new title shape not already in site-processor.md's "Known API-rejected title shapes" list, say plainly that it's worth adding. This is the only way that list grows — the API never tells anyone which row it dropped, only a human reading this report does.
+If `skippedNonIt` or `skippedSenior` came back non-zero, give it its own line — name the specific title(s), read straight off `results` (per the lookup rule above, not attributed by guessing), and if it's a new title shape not already in site-processor.md's "Known API-rejected title shapes" list, say plainly that it's worth adding. Reading `results` is now the only way that list grows accurately — the API tells you exactly which row it dropped and why, so there is no excuse for adding a shape from a guess.
 
 If the POST failed for any reason, say so explicitly and prominently: that means this run saved nothing.
 
