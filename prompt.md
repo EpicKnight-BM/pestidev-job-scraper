@@ -36,8 +36,10 @@ environment under a different name, the prefix differs but the tool's own name d
 shows.
 
 `get_registry` returns the registry snapshot as JSON text in its result content — the identical
-object the old REST GET returned. `submit_findings` returns the identical `{ok, ingested, rateLimit,
-counts}` object the old REST POST returned. Read them exactly as Steps 1 and 4 describe.
+object the old REST GET returned. `submit_findings` returns the identical `{ok, ingested, results,
+rateLimit, counts}` object the old REST POST returned — `results` (added 2026-09-16, Andrssss/
+MyWebsite) is new: one entry per finding YOU submitted, so you can look up exactly what happened to
+a specific url instead of only seeing aggregate counts. Read them exactly as Steps 1 and 4 describe.
 
 **Before Step 1, check whether `get_registry` is in your available tools. If it is not, STOP
 immediately** — do not go looking for a token, do not attempt a curl/REST workaround, and do not
@@ -347,17 +349,23 @@ All three keys are optional — send only what applies. Send `findings: []` on a
 
 ### What the API can return — handle each of these
 
-- A normal result whose text is `{ok:true, ingested, rateLimit, counts}` is success. Body has
-  `ingested` (per-source `inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt` /
-  `skippedLocation`) and a `rateLimit` block. Read both. `skippedSenior` here means a senior TITLE
-  the API's denylist caught; `skippedLocation` means the API's own location backstop caught a
-  posting whose `location` text named somewhere other than Budapest with no ambiguity — if this is
-  non-zero for a posting you thought was ambiguous, treat it as a signal to write a clearer
-  `location` value next time, not as a bug. **If `skippedNonIt` is non-zero and you flagged any
-  title as fallback-risky per filter 3** (only possible when `check_titles` was unavailable), name
-  that title in your final report as a candidate for filter 3's fallback list — the same way "Közmű
-  SAP szakértő" and "Szoftverüzemeltető" got added. If ambiguous, say "couldn't attribute" rather
-  than guessing.
+- A normal result whose text is `{ok:true, ingested, results, rateLimit, counts}` is success. `ingested`
+  has the aggregate per-source counts (`inserted` / `skippedSenior` / `skippedCompany` / `skippedNonIt`
+  / `skippedLocation`) — read it for the totals, but do NOT try to attribute a non-zero count back to
+  a specific title by guessing or by counting how many findings you flagged as risky. `results` is
+  the exact answer: one `{url, title, slug, status, reason}` entry per finding you submitted, in this
+  batch's `findings` array, `status` being one of `inserted`, `handed_to_ats`, `duplicate`,
+  `skipped_non_it`, `skipped_senior_title`, `skipped_senior_experience`, `skipped_location`,
+  `skipped_company`, `invalid` (malformed slug/title/url, or a duplicate url within your own batch),
+  or `throttled` (accepted by budget-check but not processed — will be re-found next run, do not
+  resubmit it). Look up a submitted url in `results` instead of guessing. `skippedSenior` in `ingested`
+  means a senior TITLE the API's denylist caught; `skippedLocation` means the API's location backstop
+  caught a posting whose `location` text named somewhere other than Budapest with no ambiguity — if
+  this is non-zero for a posting you thought was ambiguous, treat it as a signal to write a clearer
+  `location` value next time, not as a bug. **If any `results` entry has `status: "skipped_non_it"`**,
+  name that exact title in your final report as a candidate for filter 3's fallback list — the same
+  way "Közmű SAP szakértő" and "Szoftverüzemeltető" got added. This is now a lookup, never a guess —
+  there is no more "couldn't attribute" case for a finding YOU submitted this call.
 - A result with `isError: true` is the API refusing your payload. Its text carries `too_many_rows`
   (with `max` / `received`) when you sent more findings than the API accepts in one call — you
   should never be near this if you followed the budget rule — or `rate_limited` (with `limit` /

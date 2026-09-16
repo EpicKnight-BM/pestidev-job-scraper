@@ -376,7 +376,10 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    guess from the same word list — developer / engineer / fejlesztő / tester / tesztelő / QA / DevOps
    / rendszergazda / adatbázis / analyst / rendszerszervező. No match despite an IT-relevant body →
    set `titleApiRisk: true` on the finding and say why in `why`; still return it, but the flag lets
-   the orchestrator deprioritize it under a tight budget and trace a later `skippedNonIt` back to it.
+   the orchestrator deprioritize it under a tight budget if it has to trim the batch (2026-09-16: the
+   orchestrator no longer needs this flag to TRACE a later `skippedNonIt` back to a title — `results`
+   in the `submit_findings` response now names the exact url — but a flag known before submission is
+   still the only thing that can save a slot for a safer finding ahead of time).
    Confirmed misses: 2026-08-24 "Közmű SAP szakértő" (MVM Informatika Zrt.) and 2026-09-08
    "Szoftverüzemeltető" (Direktor Szoftver Kft.) — see **Known API-rejected title shapes** below.
 
