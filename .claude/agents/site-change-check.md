@@ -27,7 +27,8 @@ The orchestrator gives you:
 ## Before your first fetch — the excluded-company stop ★
 
 If `slug` or `url` names a permanently-rejected company — above all **`nix` / NIX Hungary Kft. /
-`nixstech.com`** — or the orchestrator's note says the company is permanently rejected, do not
+`nixstech.com`** (see INCIDENTS.md § `nix` / NIX Hungary Kft. / nixstech.com for why this one is
+called out by name) — or the orchestrator's note says the company is permanently rejected, do not
 fetch. Return the JSON below with `"status":"skipped_permanently_rejected"`, `"changed": false`
 and empty `currentListingUrls`/`newUrls`, then stop. The orchestrator should not have
 dispatched you for such a site at all; a "confirmation fetch" of one is not a thing, and the entry belongs out of
@@ -36,8 +37,8 @@ dispatched you for such a site at all; a "confirmation fetch" of one is not a th
 ## How to fetch — this is not optional
 
 Fetch with curl, never bare WebFetch. WebFetch has NO timeout parameter and CANNOT be interrupted
-once it hangs. On 2026-08-17 a re-check fetch of `jobs.ozeki.hu` hung for THIRTY-THREE MINUTES and
-the entire run had to be killed before it ever submitted anything.
+once it hangs (confirmed 2026-08-17 — a 33-minute hang killed an entire run; see INCIDENTS.md § One
+unresponsive page consuming a whole run).
 
 ```
 timeout 70 curl -sS --connect-timeout 10 --max-time 60 -L "<url>" -o <file> -w "HTTP:%{http_code} TIME:%{time_total}\n" ; echo "exit=$?"
@@ -60,26 +61,18 @@ back unchanged as `currentListingUrls`. None of them is a reason to retry.
 3. Compare the set you just extracted against `storedListingUrls`.
 4. **Before finalizing which URLs are "new" — check for a rotated URL, not a rotated posting ★**
 
-   Confirmed 2026-09-02 on joinus.hu (Knorr-Bremse): the exact same posting — "Embedded Middleware
-   Developer Trainee – EBS/ABS System and Integration Team", same company, same body — had TWO
-   different URLs across two crawls. An earlier-indexed link ending `...-f16d` now 404s; the live
-   posting's own `<link rel="canonical">` now points to `...-f16d-f3ee`. Some ATS platforms mint a
-   fresh random suffix for a posting's URL on every crawl or every publish — the posting did not
-   change, only its URL did. Treated naively (every URL absent from `storedListingUrls` is "new"),
-   this creates a fresh duplicate row on the live board every single time it rotates, because
-   `(source, url)` is the database row identity and the API has no way to know two different URL
-   strings are the same posting — the same "url IS the row identity" principle behind every hand
-   scraper on this board, which is why volatile-ID sources there get migrated in place instead of
-   churning new rows.
+   Some ATS platforms mint a fresh random suffix for a posting's URL on every crawl or every
+   publish — the posting did not change, only its URL did. Treated naively (every URL absent from
+   `storedListingUrls` is "new"), this creates a fresh duplicate row on the live board every single
+   time it rotates, because `(source, url)` is the database row identity (confirmed 2026-09-02 on
+   joinus.hu — see INCIDENTS.md § URL rotation vs. a genuinely new posting).
 
    So before adding a URL to `newUrls`, check it against every URL in `storedListingUrls`:
-   - Take the URL's last path segment.
-   - Strip ONE trailing `-<token>` where `<token>` is a short (3-8 character) lowercase
-     letters/digits hyphen-separated tail (e.g. `-f3ee`, `-a1b2c3`). Repeat once more if the result
-     still ends in such a tail — some platforms append more than one.
-   - If the stripped segment of a "new" URL is IDENTICAL to the stripped segment of a stored URL
-     (same domain and path prefix otherwise), this is NOT a new posting — it is the same posting's
-     URL rotating. Do NOT put it in `newUrls`.
+   - Run `timeout 5 sh scripts/strip-url-tail.sh "<url>"` on the candidate URL and on each stored
+     URL. This strips a rotating hash-like tail from the last path segment the same way on both
+     sides.
+   - If the script's output for a "new" URL is IDENTICAL to its output for a stored URL, this is
+     NOT a new posting — it is the same posting's URL rotating. Do NOT put it in `newUrls`.
    - Still put the CURRENT (rotated) URL in `currentListingUrls` — that is what next run's comparison
      needs, and it is what stops the same rotation from being flagged as "new" again.
    - If the match is not clean, fall through to treating it as new — a missed real posting is worse
@@ -94,9 +87,9 @@ same as present-but-empty: an empty set is a real state (a site we have never en
 absent field means the orchestrator dispatched you wrong and you have nothing to diff against. Still
 return your `currentListingUrls` — the fetch was not wasted — but set `"changed": true` and open your
 `note` with the exact words `NO storedListingUrls IN DISPATCH`. Do NOT report `changed: false`, which
-reads as "this page is unchanged" and lets a stale listing pass silently. Confirmed 2026-09-02: every
-agent in that run inferred `changed: false` from a missing field, and 14 sites were wrongly reported
-unchanged.
+reads as "this page is unchanged" and lets a stale listing pass silently (confirmed 2026-09-02 — 14
+sites were wrongly reported unchanged this way in one run; see INCIDENTS.md § `storedListingUrls`
+dispatch field must be named exactly).
 
 Note that step 4's rotated-URL check diffs against `storedListingUrls` too, so it cannot run either
 when the field is missing. Every rotated URL will therefore look new. That is the second half of why

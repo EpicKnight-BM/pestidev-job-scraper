@@ -51,9 +51,9 @@ The orchestrator filters permanently-rejected companies out before dispatching, 
 last line of defence and a slip costs a real fetch of a page that must never be touched again.
 
 If `company`, `domain` or `slug` names a permanently-rejected company — above all
-**`nix` / NIX Hungary Kft. / `nixstech.com`, whose postings leaked live duplicate rows onto the
-board on 2026-07-21** — or the orchestrator's own note says the company is permanently rejected,
-STOP before your first fetch and return immediately:
+**`nix` / NIX Hungary Kft. / `nixstech.com`** (see INCIDENTS.md § `nix` / NIX Hungary Kft. /
+nixstech.com for why this one is called out by name) — or the orchestrator's own note says the
+company is permanently rejected, STOP before your first fetch and return immediately:
 
 ```json
 {"slug":"nixstech","company":"NIX Hungary Kft.","listingUrl":"","status":"reject_permanent",
@@ -70,7 +70,8 @@ submitting.
 ## Fetching — this is not optional
 
 Fetch with curl, never bare WebFetch. WebFetch has NO timeout parameter and CANNOT be interrupted
-once it hangs; on 2026-08-17 one such fetch hung for thirty-three minutes and killed a whole run.
+once it hangs (confirmed 2026-08-17 — a 33-minute hang killed a whole run; see INCIDENTS.md § One
+unresponsive page consuming a whole run).
 
 ```
 timeout 70 curl -sS --connect-timeout 10 --max-time 60 -L "<url>" -o <file> -w "HTTP:%{http_code} TIME:%{time_total}\n" ; echo "exit=$?"
@@ -89,10 +90,9 @@ did manage to enumerate honestly, and return. A partial honest result beats a st
 
 **Budget your turns the same way — a result you never return is a result that never existed.** You
 have a hard `maxTurns` ceiling, and hitting it cuts you off mid-sentence: your findings are lost and
-the orchestrator gets a completed-but-empty notification. Confirmed 2026-08-24 on webshippy — this
-agent ran past 30 tool uses and had to be prompted by the orchestrator to wrap up before it returned
-anything. Stop investigating at roughly two-thirds of your turns and spend the rest writing the
-JSON. If you are running long, return what you have with an honest `postingsFound` and say so in
+the orchestrator gets a completed-but-empty notification (confirmed 2026-08-24 on webshippy — see
+INCIDENTS.md § Runaway agent on webshippy). Stop investigating at roughly two-thirds of your turns
+and spend the rest writing the JSON. If you are running long, return what you have with an honest `postingsFound` and say so in
 `note`. Never spend a turn on a fetch you cannot afford to write up.
 
 ## Step A — find the full career listing
@@ -111,19 +111,17 @@ If `listingUrl` was given, use it. Otherwise work through ALL of these before gi
   page: "<company> karrier", "<company> állásajánlatok", "<company> nyitott pozíciók". This is
   often what surfaces a subdomain that guessing never would.
 
-Two confirmed 2026-08-01 misses were companies whose career page was never reached at all:
-**ulyssys.hu** (real page `/hu/karrier.html`, missing a "Rendszermérnök" posting) and
-**karrier.nisz.hu** (found only on a later run). A first-pass miss is not permanent — a
-newly-discovered company deserves retrying, not a "no career page" verdict after one failed guess.
+A first-pass miss is not permanent — a newly-discovered company deserves retrying, not a "no career
+page" verdict after one failed guess (confirmed 2026-08-01 — two companies' real career pages were
+missed entirely on the first pass; see INCIDENTS.md § Career page never reached at all).
 
 **If the career page is a SEARCH/FILTER interface** (query-string driven — `?location=`,
 `?category=`, `locationsearch=` already applied by default), the loaded default view is often
 pre-scoped and NOT the full list. Actively broaden it: strip location/category params to see the
 unfiltered set, and check the filter UI for OTHER category values you have not tried (a numbered
 `category=<n>` implies siblings — try neighbours, or read the dropdown's option list). Evaluate the
-union of everything reachable. Confirmed miss (2026-08-01): karrier.4iggroup.hu's `/it/search/`
-IT-category page was never properly enumerated this way, and its real Budapest IT roles were never
-reached.
+union of everything reachable (confirmed miss, 2026-08-01 — see INCIDENTS.md § karrier.4iggroup.hu
+— a pre-scoped search/filter listing).
 
 ### Platform-specific routes that work
 
@@ -141,12 +139,12 @@ reached.
   only the newest batch each run. That is an accepted limitation, still far better than treating the
   site as unreachable.
   **But the JSON tells you the real number: its top-level `total` field.** Report that as
-  `postingsFound`, not the length of `rows`. Confirmed 2026-08-24 on mvm.karrierportal.hu, where
-  `total` was **164** and the run reported `postingsFound: 9` — technically the rows it saw, but it
-  reads as "MVM has 9 postings and we enumerated all of them" when 155 were never looked at. When
-  the two differ, set `postingsFound` to `total`, put the number you could actually enumerate in
-  `note`, and make the gap explicit ("164 total, only the 9 newest are reachable via /jsbq").
-  The same rule applies to any platform that exposes a total count you cannot page through.
+  `postingsFound`, not the length of `rows` — reporting only the rows you saw reads as "fully
+  enumerated" when it isn't (confirmed 2026-08-24 on mvm.karrierportal.hu: `total` was 164 against
+  a reported `postingsFound: 9`; see INCIDENTS.md § Nexum `/jsbq` endpoint reports only the newest
+  page). When the two differ, set `postingsFound` to `total`, put the number you could actually
+  enumerate in `note`, and make the gap explicit ("164 total, only the 9 newest are reachable via
+  /jsbq"). The same rule applies to any platform that exposes a total count you cannot page through.
 - **Hireify** (confirmed: MAVIR, karrier.mavir.hu). Detail pages really are an empty JS shell — but
   `robots.txt` points to a real `sitemap.xml` listing every current posting's URL with a live
   `lastmod`. Enumerate from the sitemap. When a URL slug's own words are unambiguous (e.g. a
@@ -162,26 +160,25 @@ Group, IDBC), **`*.homerun.co`** (dead for Innonic/ShopRenter), and **`*.myworkd
 EXCEPT check the listing's `og:description` meta tag first, which is server-rendered even when the
 body is not (the one Workday exception that worked: PwC).
 
-**`apply.workable.com` is Cloudflare-blocked to us — do not retry it.** Confirmed 2026-08-24: the
-board page and its widget API both returned HTTP 429 with `error code: 1015` on four consecutive
-attempts, with sleeps between them and a spoofed browser user-agent. None of that helps; 1015 is a
-rate-limit ban on the caller, not a transient error. If a company's `platformNote` mentions a
-Workable board, spend ONE attempt at most, then go straight to the company's own careers page —
-which is what actually worked for Secret Sauce Partners the same run. A Workable 429 is never a
-reason to mark a company `unreachable_timeout` or `reject_permanent`.
+**`apply.workable.com` is Cloudflare-blocked to us — do not retry it.** 1015 is a rate-limit ban on
+the caller, not a transient error, so retrying doesn't help (confirmed 2026-08-24 — see
+INCIDENTS.md § `apply.workable.com` is Cloudflare rate-limited). If a company's `platformNote`
+mentions a Workable board, spend ONE attempt at most, then go straight to the company's own careers
+page. A Workable 429 is never a reason to mark a company `unreachable_timeout` or
+`reject_permanent`.
 
 ### Do not write a company off too fast
 
-DATAPAO's Greenhouse-hosted `/careers/` looked JS-heavy at a glance, but a plain fetch already had
-6 direct `job-boards.eu.greenhouse.io/datapao/jobs/<id>` links sitting in the raw HTML, unread.
-Before concluding "JS-rendered": (1) view-source as PLAIN TEXT and actually scan for `<a href>`
-links to job detail URLs — do not stop at "the design looks like a JS app"; (2) check
-`sitemap.xml` (via `robots.txt`'s `Sitemap:` line or `<domain>/sitemap.xml` directly) and filter
-for career/job/karrier/állás paths — sites needing JS for the listing often still list every
-posting as a plain server-rendered page (confirmed: novaservices.hu, whose `/karrier` shows nothing
-in a plain fetch but whose `/sitemap.xml` lists all `/careers/<slug>` postings); (3) for a company
-on an ATS that is still yours to scrape (join.com, Workable, Breezy), the public board API or JSON
-feed is worth one try even when the board page seems broken.
+A 2026-08-04 audit proved a past "confirmed dead" verdict wrong for two platforms and recovered 10
+real postings that had been sitting unread — including DATAPAO's Greenhouse-hosted `/careers/`,
+which looked JS-heavy at a glance but had 6 direct job links already sitting unread in the raw HTML
+(full story: INCIDENTS.md § Never conclude "unreachable" from a first glance). Before concluding
+"JS-rendered": (1) view-source as PLAIN TEXT and actually scan for `<a href>` links to job detail
+URLs — do not stop at "the design looks like a JS app"; (2) check `sitemap.xml` (via `robots.txt`'s
+`Sitemap:` line or `<domain>/sitemap.xml` directly) and filter for career/job/karrier/állás paths —
+sites needing JS for the listing often still list every posting as a plain server-rendered page
+there; (3) for a company on an ATS that is still yours to scrape (join.com, Workable, Breezy), the
+public board API or JSON feed is worth one try even when the board page seems broken.
 
 **But stop before you start if the postings live on one of the eight `ats-crawl` hosts** —
 `jobs.ashbyhq.com`, `*.greenhouse.io`, `*.lever.co`, `*.smartrecruiters.com` (since 2026-08-26),
@@ -197,19 +194,18 @@ would report sit on its own domain, even if it once ran a board elsewhere.
 **`*.myworkdayjobs.com` is NOT one of the eight** — the board only tracks a fixed, manually-curated
 list of Workday tenants there, so a Workday-hosted candidate is still yours to evaluate normally.
 
-**If a listing links to PDF files instead of HTML pages** (confirmed 2026-07-23: keler.hu's entire
-careers page is PDF-only, and it returned zero findings for weeks despite real junior-friendly
-openings) — that is still a normal, workable posting. The PDF's own URL is the row identity, read
+**If a listing links to PDF files instead of HTML pages** (confirmed 2026-07-23 — see INCIDENTS.md
+§ keler.hu — PDF-only listing) — that is still a normal, workable posting. The PDF's own URL is the row identity, read
 its content for title/requirements/level exactly as you would a webpage, and apply the same 6
 filters. Enumerate every PDF the same way you would HTML detail pages.
 
 ## Step B — COUNT before you filter. This is mandatory.
 
-Five separate user-reported incidents (vector.hu, novaservices.hu, KELER, sysdata-pse.com,
-rendszerinformatika.hu — all 2026-07-22/23) were the SAME root failure: some of a site's postings
-were evaluated, the qualifying ones submitted, and the site reported as done — without anyone ever
-knowing how many postings the site actually had. "I found some and evaluated them" is not a
-completion signal. It looks identical whether you found 2 of 2 or 2 of 8.
+Five separate user-reported incidents in one week (2026-07-22/23 — see INCIDENTS.md § Count before
+you filter) were the SAME root failure: some of a site's postings were evaluated, the qualifying
+ones submitted, and the site reported as done — without anyone ever knowing how many postings the
+site actually had. "I found some and evaluated them" is not a completion signal. It looks identical
+whether you found 2 of 2 or 2 of 8.
 
 So, before evaluating a single posting against the 6 filters:
 
@@ -229,9 +225,8 @@ your own run having failed at its one job.
 HTML already contains a full set of per-job links — no JavaScript needed, visible directly in the
 raw fetch — read and judge EVERY one before deciding what to return. A link that was sitting in the
 HTML you already fetched and got skipped anyway is the single most common and most avoidable way
-real findings get missed (confirmed: vector.hu/karrier/ajanlatok had 6 job links in one plain
-fetch, only some were submitted, and the missed ones were ordinary IT dev roles that should have
-passed).
+real findings get missed (see INCIDENTS.md § vector.hu — links sitting unread in an already-fetched
+page).
 
 Concrete shape of the problem: on flexinform.hu one posting is `/karrier/junior-php-fejleszto`, but
 the listing at `/karrier` shows SIX roles (Backend, Frontend, Junior PHP, manual tester, automata
@@ -256,10 +251,8 @@ titles that survive this move on to Step B.5.
 ## Step B.5 — `check_titles`: IT-relevance + duplicate pre-check, BEFORE opening the detail page
 
 Added 2026-09-08 after two runs in a row submitted findings that then bounced at `submit_findings`
-time — `skippedNonIt` on titles that were genuinely IT roles by content ("Adatelemzési szakértő",
-"IT operátor (L2)") but matched none of the live `job_categories` keywords you have no visibility
-into, and `skippedDuplicate` on a posting another source already carried. Both cost a detail-page
-fetch and a reasoning pass for a result that was always going to be rejected downstream.
+time for reasons this check now catches first (full story: INCIDENTS.md § `check_titles` added to
+catch bounced submissions before a detail-page fetch).
 
 `check_titles` runs the EXACT SAME gates `submit_findings` applies at insert time — same
 `job_categories` keyword match, same `job_filters` senior denylist, same cross-source duplicate
@@ -294,10 +287,10 @@ orchestrator's lookup exists for.
 
 For each posting's title from the listing (the anchor text, or whatever title the listing itself
 shows — you do not need the detail page open to do this check):
-1. Strip any `(...)` parenthetical (e.g. "(Power BI)", "(m/f/d)").
-2. NFD-normalize and strip diacritics, lowercase, replace every run of non-`[a-z0-9]` characters with
-   a single space, trim.
-3. If the result exactly matches an entry in `knownActiveTitles`, this posting already exists in the
+1. Run `timeout 5 sh scripts/fold-name.sh title "<title>"` — it strips any `(...)` parenthetical
+   (e.g. "(Power BI)", "(m/f/d)"), then normalizes the same way the server does, for an exact
+   comparison against `knownActiveTitles`.
+2. If the result exactly matches an entry in `knownActiveTitles`, this posting already exists in the
    live database under some source — do NOT open its detail page, do not evaluate it against the 6
    filters below, and do not include it in `findings`. It still counts in `postingsFound` (you did
    enumerate it) — just not in `itRelevant` or `passedLevel`, and say how many you skipped this way in
@@ -317,12 +310,11 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    page carries a `<link rel="canonical">` tag, report THAT href as the posting's `url`, not
    whatever link you followed to reach it — this avoids incidental variant-URL duplicates within
    one run (query strings, tracking params, alternate share links). It does NOT protect against a
-   platform whose canonical URL itself rotates between separate runs — confirmed 2026-09-02 on
-   joinus.hu (Knorr-Bremse), where the same posting's own canonical URL differed from an
-   earlier-crawl URL for the identical title/company/body. That case is handled one layer up, by the
-   URL-churn check in `site-change-check` (and the orchestrator's Step 2) comparing this run's URLs
-   against the site's previously stored ones — not something you can catch from inside a single
-   fetch. Reject any site where several different job titles
+   platform whose canonical URL itself rotates between separate runs (confirmed 2026-09-02 on
+   joinus.hu — see INCIDENTS.md § URL rotation vs. a genuinely new posting). That case is handled
+   one layer up, by the URL-churn check in `site-change-check` (and the orchestrator's Step 2)
+   comparing this run's URLs against the site's previously stored ones — not something you can
+   catch from inside a single fetch. Reject any site where several different job titles
    share one page/anchor with no distinct detail URL per job — the URL is the database row identity,
    and a shared URL would silently overwrite a different job. A single posting that legitimately
    describes ONE role with two variants under one shared application form (e.g. a ".NET/JAVA
@@ -332,10 +324,9 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    (e.g. `example.com/careers#ai-integration-specialist`) or its own distinct apply link/email, that
    anchor IS a distinct identity: use `pageURL#anchor` as the row identity and evaluate each role
    separately. Only reject the whole page when postings are truly indistinguishable (same anchor,
-   same apply target, no way to tell which role you would be applying to). Confirmed miss
-   (2026-08-01): electronholding.com/careers#positions lists multiple distinct, individually
-   anchored roles — "AI Integration Specialist (junior)" and "Alkalmazásüzemeltető" were both
-   missed even though each was its own distinguishable card. **The opposite mistake also happens:
+   same apply target, no way to tell which role you would be applying to) — confirmed miss,
+   2026-08-01, see INCIDENTS.md § Anchored roles on one page treated as one posting. **The opposite
+   mistake also happens:
    the SAME real opening listed under several separate, fully-distinct URLs on one company's own
    listing page** — not query-string variants, not in-page anchors, genuinely separate pages (e.g.
    numbered slug siblings like `/java-developer/`, `/java-developer-2/`, `/java-developer-3/`).
@@ -346,10 +337,8 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    SAME-RUN problem — the `knownActiveTitles` check above only protects against re-finding a title
    across SEPARATE runs (it is populated from the DB before this run starts), it does nothing for
    duplicate entries discovered together in ONE enumeration pass, so you have to catch it yourself
-   while enumerating the listing, before returning findings. Confirmed case (2026-07-29):
-   innoview.hu/en/allas/java-developer/ and its numbered siblings `-2`/`-3`/`-4` were all the
-   identical "Java Developer" opening — all four got returned as separate findings in a single run,
-   creating four duplicate rows on the board.
+   while enumerating the listing, before returning findings (confirmed case, 2026-07-29 — see
+   INCIDENTS.md § Numbered URL siblings re-listing one opening).
 2. **Server-rendered HTML** — the description text must be visible without JavaScript. If a fetch
    returns only a title/nav shell with no real body text, reject it and move on; do not retry the
    same URL. (But try the sitemap fallback above before concluding a whole company is unreachable.)
@@ -360,14 +349,15 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    "analyst"/"business analyst", not generic admin). A plain "Business Analyst" with no literal "IT"
    prefix still qualifies when the company is fundamentally a software/tech business (insurtech,
    fintech, SaaS) — judge from what the company actually builds, do not require the exact phrase.
-   Missed example (2026-08-01): ominimo.ai/career, an insurtech, posted a plain "Business analyst"
-   that should have qualified. Reject sales, marketing, HR, generic admin, and pure business/
-   design-only roles at companies that are NOT themselves tech businesses. **Watch for false
-   positives from a bare keyword match** (2026-08-04 audit): "Biztonsági Munkatárs" at a
-   transport/logistics company can be PHYSICAL security (vagyonőr, gazdaságvédelem), not IT
-   security; "Hálózatszervezési és üzemeltetési munkatárs" at a postal company can mean organising
-   the physical POST-OFFICE BRANCH network, not IT networking. Read enough of the body to confirm
-   the role is actually about computers/software/IT infrastructure before returning it.
+   Reject sales, marketing, HR, generic admin, and pure business/design-only roles at companies
+   that are NOT themselves tech businesses (missed example, 2026-08-01: an insurtech's plain
+   "Business analyst" should have qualified). **Watch for false positives from a bare keyword
+   match** — "Biztonsági Munkatárs" at a transport/logistics company can be PHYSICAL security
+   (vagyonőr, gazdaságvédelem), not IT security; "Hálózatszervezési és üzemeltetési munkatárs" at a
+   postal company can mean organising the physical POST-OFFICE BRANCH network, not IT networking
+   (2026-08-04 audit — see INCIDENTS.md § Never conclude "unreachable" from a first glance for the
+   audit that also caught this). Read enough of the body to confirm the role is actually about
+   computers/software/IT infrastructure before returning it.
    **The API re-checks this filter on the TITLE ALONE, so a title with no recognisable IT word gets
    dropped no matter how IT-relevant the body is.** `check_titles` (Step B.5) already checks this
    authoritatively — a title that got `verdict: "keep"` there needs no further guessing here.
@@ -380,12 +370,12 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    orchestrator no longer needs this flag to TRACE a later `skippedNonIt` back to a title — `results`
    in the `submit_findings` response now names the exact url — but a flag known before submission is
    still the only thing that can save a slot for a safer finding ahead of time).
-   Confirmed misses: 2026-08-24 "Közmű SAP szakértő" (MVM Informatika Zrt.) and 2026-09-08
-   "Szoftverüzemeltető" (Direktor Szoftver Kft.) — see **Known API-rejected title shapes** below.
+   See **Known API-rejected title shapes** below for confirmed cases.
 
    ### Known API-rejected title shapes (`check_titles`-fallback only)
 
-   Confirmed titles with IT-relevant bodies that still failed the title-only `skippedNonIt` check:
+   Confirmed titles with IT-relevant bodies that still failed the title-only `skippedNonIt` check
+   (full story for each: INCIDENTS.md § Known API-rejected title shapes):
 
    - **"Közmű SAP szakértő"** (2026-08-24, MVM Informatika Zrt.) — "közmű szakértő" (utility
      specialist) has no IT token even though the body is SAP IS-U application support.
@@ -437,11 +427,10 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    "remote", "tavmunka", "home office", "orszagos", "magyarorszag", "hungary", "barhol") with no
    geography knowledge, so a street it can't recognize gets silently dropped as "somewhere else" even
    when it's genuinely in Budapest. If you can't tell which city an address belongs to, treat it as
-   unstated rather than guessing. Confirmed miss (2026-09-03): whitehair.hu's "Front-end fejlesztő"
-   gave only "Nádorliget utca 7/a" — Budapest XI. kerület, postcode 1117 — but was returned as raw
-   street text with none of the recognized hint words, so the API silently dropped it. Always fill
-   `location` — leave it empty only when the posting truly states nothing and no address can be
-   resolved either, since an empty field is what tells the API's backstop filter to keep it.
+   unstated rather than guessing (confirmed miss, 2026-09-03 — see INCIDENTS.md § Location
+   resolution — a bare street address isn't "unstated"). Always fill `location` — leave it empty
+   only when the posting truly states nothing and no address can be resolved either, since an empty
+   field is what tells the API's backstop filter to keep it.
 
 ## On the `experienceLiteral` field — read this carefully
 
@@ -456,9 +445,8 @@ This field is ONLY for what is literally written in the posting, never your own 
 
 This is not a style preference. The API HARD-DISCARDS a bare level word here unless the title
 independently confirms it — as of 2026-07-23 it no longer trusts even an exact canonical word from
-this field, because that is exactly how a bare guess with zero textual backing slipped through twice
-(2026-07-21 flexinform; 2026-07-23 sysdata-pse.com "Tesztautomatizálási mérnök", which had no level
-word or years figure anywhere in the real posting and was stamped "medior" anyway).
+this field, because that is exactly how a bare guess with zero textual backing slipped through
+twice (see INCIDENTS.md § `experienceLiteral` must trace to real text, never a guess).
 
 Your judgment IS still what decides accept/reject in filter 5. It is only the literal
 `experienceLiteral` value that must trace back to real text.
@@ -504,13 +492,11 @@ diffs against it.
 
 **Exclude URLs you confirmed are dead.** A link the listing still shows but which returns a real 404
 is not a current posting, and putting it in `listingUrls` makes the next run diff against a ghost
-forever. Confirmed 2026-08-24 on webshippy: `/senior-fullstack-developer/` and
-`/robot-system-engineer/` were still linked from the EN listing, both returned genuine "Az oldal nem
-található" 404 pages, and both were recorded anyway. Verify before dropping — a 404 on one fetch of
-an otherwise healthy site is worth one retry, since a transient 5xx or a redirect loop is not the
-same thing — then leave the confirmed-dead ones out and say so in `note` ("2 stale links on the
-listing 404 and were excluded"). Do NOT drop a URL you simply did not get around to opening; that
-one belongs in the set.
+forever (confirmed 2026-08-24 on webshippy — see INCIDENTS.md § Dead links left in `listingUrls`).
+Verify before dropping — a 404 on one fetch of an otherwise healthy site is worth one retry, since a
+transient 5xx or a redirect loop is not the same thing — then leave the confirmed-dead ones out and
+say so in `note` ("2 stale links on the listing 404 and were excluded"). Do NOT drop a URL you
+simply did not get around to opening; that one belongs in the set.
 
 `status: "reject_permanent"` is ONLY for sites that can never work regardless of timing —
 JS-rendered ATS with no per-job URL, wrong vertical, aggregator, already-covered domain, or a board
