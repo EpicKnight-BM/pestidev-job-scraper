@@ -38,6 +38,8 @@ roles on individual company career pages rather than the big aggregator job boar
 | `.claude/agents/company-discovery.md` | Search for untracked Hungarian companies with their own career pages. Does not open or judge postings. Sonnet. |
 | `.claude/settings.json` | Tool allowlist that lets the routines run unattended, with the incident history explaining each rule. |
 | `.mcp.json` | Registers the `pestidev` MCP server (the registry API). |
+| `INCIDENTS.md` | Full narrative behind every dated rule in the prompt files — the run, the date, the root cause. Not read by any agent; see below. |
+| `scripts/` | Small POSIX-shell scripts (`fold-name.sh`, `strip-url-tail.sh`) that replace two deterministic string algorithms previously spelled out in prose in multiple prompt files. Every prompt invokes them prefixed with `timeout N` to stay inside `.claude/settings.json`'s `Bash(timeout:*)` allow rule — an unattended run has nobody to approve a command that falls through to the auto-mode classifier. |
 
 The two prompt files are alternative drivers for the same job, running on staggered schedules against
 shared state. A run follows exactly one of them — the subagents are for `prompt-v2.md` only, and
@@ -45,13 +47,24 @@ their descriptions say so.
 
 ## A note on the prompt files
 
-Roughly a third of each prompt file is accumulated incident knowledge: corrections written after
-specific failed runs, each with a date and the company that exposed it. Sections marked `★` and `⚠`
-exist because something was missed without them.
+Roughly a third of each prompt file used to be accumulated incident knowledge written inline: a
+rule followed by two or three sentences narrating the specific failed run, date, and company that
+exposed it. Sections marked `★` and `⚠` exist because something was missed without them.
 
-**Relocate that material, never rewrite it.** It reads as verbose and redundant; it is neither. See
-the "count before you filter" and "enumerate the WHOLE career page" sections for the clearest
-examples of rules that look obvious and were not.
+**The full narrative now lives in `INCIDENTS.md`, not inline.** Each prompt file keeps a short
+tag next to the rule — a date plus the terse consequence, e.g. `(confirmed 2026-08-24 — burned 48
+tool uses, returned nothing; see INCIDENTS.md § Turn-budget cutoffs)` — and nothing more. This is
+deliberate, not a shortcut: the subagents in `.claude/agents/` only ever read their own prompt
+file, never `INCIDENTS.md` (spending a turn to open a second file is exactly the kind of cost the
+turn-budget rules in those files exist to prevent), so the concrete "this really happened" signal
+that makes a rule stick has to survive as that one-line tag — a bare "see INCIDENTS.md" link with
+nothing inline would be no different, in practice, from deleting the incident outright.
+
+**When adding a new incident**, follow that same pattern: append the full story to the matching
+`INCIDENTS.md` entry (or a new one), and add or update the one-line tag at the rule's call site.
+**Never rewrite a rule's substance to make it shorter** — see the "count before you filter" and
+"enumerate the WHOLE career page" sections for the clearest examples of rules that look obvious and
+were not.
 
 ## The `pestidev` name inside the repo
 

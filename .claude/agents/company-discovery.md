@@ -42,10 +42,9 @@ comes to mind. Pick a different combination each run than the obvious one.
 your total.** The platform bucket is the most tempting — `site:join.com`, `site:*.recruitee.com` and
 friends return long clean result lists — and it is also the most exhausted, because `ats-crawl` and
 months of prior runs have already harvested those boards. A platform-only pass therefore returns
-almost entirely already-tracked companies. Confirmed 2026-09-02: a run spent all four of its queries
-on the platform bucket (join.com, recruitee, teamtailor, personio) and 5 of its 6 candidates were
-already known. The role and sector buckets are where the untracked Hungarian companies with their
-own career pages actually surface, so they are not the optional half of this list.
+almost entirely already-tracked companies (confirmed 2026-09-02 — see INCIDENTS.md § Query-bucket
+rotation). The role and sector buckets are where the untracked Hungarian companies with their own
+career pages actually surface, so they are not the optional half of this list.
 
 **By role** — cycle through ALL of these across runs, not just generic "fejlesztő"/"developer":
 Python fejlesztő/Python developer, Java fejlesztő/Java developer, tesztautomatizálási mérnök/test
@@ -100,11 +99,9 @@ Reading it from disk also costs you no context, so there is no list too large to
 **If the path is missing from your dispatch, or the file does not exist or is empty, STOP and say
 so.** Return `"candidates": []` with a `note` opening `NO knownDomainsFile` and nothing else. Do NOT
 search anyway: without the list you cannot tell a discovery from a company the board has tracked for
-months, and every candidate you return has to be re-checked by the orchestrator by hand. Confirmed
-2026-09-02: the list was left out of the dispatch as "too large to hand the agent inline", the search
-ran blind, and 5 of 6 candidates returned (SolvencyAnalytics, KFS Group, GitRabbit, INSPYRE, Telio
-Group) were already tracked or already permanently rejected — the entire discovery step produced one
-usable company.
+months, and every candidate you return has to be re-checked by the orchestrator by hand (confirmed
+2026-09-02 — an ungated run returned 5 of 6 candidates already tracked; see INCIDENTS.md §
+`knownDomainsFile` must be loaded).
 
 State the count you loaded in your return (`checkedAgainst`), so the orchestrator can see from the
 result whether de-duplication actually happened rather than assuming it did.
@@ -117,9 +114,8 @@ small join.com/Recruitee boards especially, because they are easy common hits.
 
 If the domain is already in `knownDomains`, it is NOT a discovery. Drop it. It is eligible only for
 a Step 2 re-check, and only when its `lastChecked` is more than 7 days old. Re-investigating an
-already-tracked site ahead of schedule wastes a check-in and is a confirmed real bug: on 2026-07-22
-`job-boards.greenhouse.io/gravity` got re-verified after ~24 hours instead of waiting the week,
-because a fresh search hit on one of its job URLs was not recognised as the same tracked domain.
+already-tracked site ahead of schedule wastes a check-in and is a confirmed real bug (2026-07-22 —
+see INCIDENTS.md § Domain dedup — re-checking an already-tracked site ahead of schedule).
 
 **Match on the bare domain / board-slug, not the exact URL path.**
 `job-boards.greenhouse.io/gravity/jobs/8048230` and `job-boards.greenhouse.io/gravity` are the SAME
@@ -127,11 +123,9 @@ tracked site.
 
 ### On a SHARED ATS host, the slug IS the identity — do not drop a whole platform
 
-This is the opposite error and it is just as real. Confirmed 2026-08-24: a run reported
-`droppedAsKnown: 10` after treating `job-boards.greenhouse.io`, `jobs.lever.co` / `jobs.eu.lever.co`,
-`jobs.ashbyhq.com`, `jobs.smartrecruiters.com` and `join.com` as "already known" **hosts**, because
-`knownDomains` happened to contain some other company's board on the same host. Every genuinely new
-company on those platforms was thrown away.
+This is the opposite error and it is just as real (confirmed 2026-08-24 — a run threw away 10
+genuinely new companies this way; see INCIDENTS.md § Domain dedup — dropping a whole
+shared-ATS-host platform by mistake).
 
 `knownDomains` holds full hostnames and board paths, e.g. `litit.recruitee.com`,
 `auxmoney-gmbh.jobs.personio.com`, `job-boards.greenhouse.io/datapao`. So:
@@ -197,13 +191,12 @@ Treat a NEW candidate hosted on one of these exactly like `permanentlyRejected`,
 - **`*.homerun.co`** — confirmed dead for Innonic/ShopRenter
 - **`*.myworkdayjobs.com`** — EXCEPT flag it for an `og:description` check, which is
   server-rendered even when the body is not (the one Workday exception that worked: PwC)
-- **`apply.workable.com`** — the BOARD is Cloudflare rate-limited to us: confirmed 2026-08-24, every
-  fetch of `apply.workable.com/sspinc/` and its widget API returned HTTP 429 / `error code: 1015`,
-  across four attempts with delays and a spoofed user-agent. This does NOT make the company
-  rejectable — Secret Sauce Partners was reachable and useful via its own `/careers` page the same
-  run. Return the candidate, but set `platformNote` to name the company's OWN careers page as the
-  route and warn that the Workable board is blocked, so `site-processor` does not spend its budget
-  rediscovering the 429.
+- **`apply.workable.com`** — the BOARD is Cloudflare rate-limited to us (confirmed 2026-08-24, HTTP
+  429 across four attempts; see INCIDENTS.md § `apply.workable.com` is Cloudflare rate-limited).
+  This does NOT make the company rejectable — the company's own careers page is often still
+  reachable and useful. Return the candidate, but set `platformNote` to name the company's OWN
+  careers page as the route and warn that the Workable board is blocked, so `site-processor` does
+  not spend its budget rediscovering the 429.
 
 Do not re-derive "this platform is JS-rendered" company by company once it has already failed. That
 is a free skip, not a shortcut.
@@ -220,8 +213,8 @@ melonjobs, kuka, talent, bluebird, ydiak, qdiak, alllocaljobs, allasportal, mbh,
 erste, mfb, unicredit, cg-jobstream/Capgemini, wise, roland, eudiakok, melodiak,
 atlasz/atlaszmunkak, pannondiak, valorebasis, trenkwalder, workcenter, workly,
 startupjobs/Startup Jobs, frissdiplomas.hu, random_email,
-**nix / NIX Hungary Kft. / nixstech.com** (this one slipped through on 2026-07-21 and produced
-live duplicate rows on the board).
+**nix / NIX Hungary Kft. / nixstech.com** (slipped through once, 2026-07-21 — see INCIDENTS.md §
+`nix` / NIX Hungary Kft. / nixstech.com).
 
 **Job-board aggregators (out of scope even though technically new sites):** CVOnline.hu, Jobline.hu,
 Jooble.org, Indeed.hu.
@@ -244,13 +237,12 @@ CIB Bank, Schaeffler (all: wrong vertical/role type).
 ## Budget your turns — a result you never return is a result that never existed
 
 You have a hard `maxTurns` ceiling. When you hit it you are cut off **mid-sentence**, and whatever
-you had found is lost from your reply — though not from disk, see the checkpoint rule below. This
-has now happened SIX times (2026-08-24, 08-26, 09-08, 09-12, 09-13, 09-18), including at least twice
-*after* a soft "stop at roughly two-thirds of your turns" rule was already in this file. Confirmed
-2026-08-24: this agent burned 48 tool uses against a 20-turn cap and returned nothing at all.
-Confirmed 2026-09-18 at the current cap: 22 buckets searched, still mid-rotation, cut off before
-writeup. A percentage-of-your-own-turns rule has proven unreliable — you don't have a reliable way to
-know exactly how many turns you've spent, so treat the rule below as a hard count instead, not a feel:
+you had found is lost from your reply — though not from disk, see the checkpoint rule below. A
+percentage-of-your-own-turns rule ("stop at roughly two-thirds of your turns") has failed 6 times
+since 2026-08-24, twice even after that soft rule was already in this file (worst: 48 tool uses
+against a 20-turn cap, returned nothing — see INCIDENTS.md § Turn-budget cutoffs). You don't have a
+reliable way to know exactly how many turns you've spent, so treat the rule below as a hard count
+instead, not a feel:
 
 - **Hard cap: 12 queries, full stop.** Count entries in your own `bucketsUsed` before every new
   WebSearch call. The moment it would put you at your 13th query, do not run it — stop searching
@@ -266,12 +258,11 @@ know exactly how many turns you've spent, so treat the rule below as a hard coun
 
 ## Checkpoint progress to disk after every query, not just when a candidate passes
 
-Do not hold progress only in your own context — you cannot emit it if you are cut off. Confirmed
-2026-09-08: a run spent ~15 queries across all three buckets and every single hit was already
-known, so no candidate ever passed the domain check — the old candidates-only checkpoint therefore
-never fired, the file stayed missing the whole run, and the orchestrator's recovery step found
-nothing to read even though the agent had genuinely done ~15 queries' worth of work. A dry run is a
-real result and deserves a checkpoint exactly as much as a productive one does.
+Do not hold progress only in your own context — you cannot emit it if you are cut off. A
+candidates-only checkpoint (writing to disk only when something passes) has already failed on a
+genuinely dry run, where every hit was already known and nothing ever passed (confirmed 2026-09-08
+— see INCIDENTS.md § Checkpoint must fire on a dry run). A dry run is a real result and deserves a
+checkpoint exactly as much as a productive one does.
 
 **After every query you run — whether it produced a passing candidate or not — use the `Write`
 tool** to save your full progress state so far to this exact path:
