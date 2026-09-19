@@ -258,44 +258,59 @@ With remaining budget:
    file's path as `knownDomainsFile`, plus how many candidates you want. It rotates across
    role/platform/sector query buckets and de-duplicates by domain before it returns anything.
 
-   Write one entry per line — every domain in `sites`, then each `permanentlyRejected` record's
-   `domain` (fall back to `company` when a record has no `domain`) — to
-   `/tmp/pestidev-known-domains.txt`, and pass that path. **Do not paste the list into the
-   dispatch prompt.** It is ~900 lines, and an inline list that size is one the dispatch will drop
-   under its own weight: confirmed 2026-09-02, when the list was omitted as "too large to hand the
-   agent inline", the agent searched blind and 5 of its 6 candidates were already tracked or already
-   permanently rejected. The agent has `Bash` and `Read`, so it greps the file directly — the list
-   can grow without ever making the dispatch bigger.
+   Write one entry per line, derived from each `sites` record's `url`: **on a shared multi-tenant
+   ATS host** (`greenhouse.io`, `lever.co`, `ashbyhq.com`, `smartrecruiters.com`, `recruitee.com`,
+   `personio.com`, `workable.com`, `breezy.hr`, `join.com`, `karrierportal.hu`, `hrfelho.hu` — the
+   same list `company-discovery.md` uses) write the hostname PLUS the tenant path, e.g.
+   `join.com/companies/kfs1`, never the bare host `join.com` alone — the tenant slug is the actual
+   identity there, and `company-discovery` matches whole-line against exactly this shape. For every
+   other site, the bare hostname is fine. Do the same for each `permanentlyRejected` record's
+   `domain` (fall back to `company` when a record has no `domain`). Write the result to
+   `/tmp/pestidev-known-domains.txt`, and pass that path.
+
+   **Confirmed recurring bug, same three companies each time (2026-09-05, 2026-09-12, 2026-09-18):**
+   when this file held bare hostnames only, KFS Group, GitRabbit, and INSPYRE — all join.com tenants
+   — kept re-surfacing as "new" discoveries, because a lone `join.com` line can't tell their tenant
+   apart from any other company on that host. Each run so far has caught and self-corrected this by
+   hand before submitting, at the cost of wasted discovery budget; writing the full tenant path here
+   is what actually closes it, rather than relying on the orchestrator to keep catching it.
+
+   **Do not paste the list into the dispatch prompt.** It is ~900 lines, and an inline list that size
+   is one the dispatch will drop under its own weight: confirmed 2026-09-02, when the list was
+   omitted as "too large to hand the agent inline", the agent searched blind and 5 of its 6
+   candidates were already tracked or already permanently rejected. The agent has `Bash` and `Read`,
+   so it greps the file directly — the list can grow without ever making the dispatch bigger.
 
    The agent returns `checkedAgainst`, the number of lines it actually loaded. **If that is 0 or
    missing, its candidates were not de-duplicated** — check the file was written and re-dispatch,
    rather than spending your own turns re-checking its output against the registry by hand.
-2. **If it comes back empty or cut off mid-sentence, recover it — do not treat that as "no
-   candidates found".** This agent has hit its `maxTurns` ceiling and returned nothing THREE times
-   now (2026-08-24, 2026-08-26, and 2026-09-08); every one of those runs was saved only because the
-   orchestrator noticed and recovered it, and a run that accepts the empty result silently loses
-   the whole discovery step. When the agent completes with no `candidates` array, or its reply ends
-   mid-sentence:
-   - **Read `/tmp/pestidev-discovery-candidates.json` first.** The agent checkpoints its full
-     progress there after EVERY query — not only when a candidate passes — so the file is written
-     even on a genuinely dry stretch (confirmed 2026-09-08: a run whose every hit was already known
-     found the file missing under the old candidates-only checkpoint, because nothing had ever
-     passed to trigger a write). It holds a JSON object with `bucketsUsed`, `candidates`,
-     `checkedAgainst`, `droppedAsKnown`, `droppedAsExcluded` and `inProgress: true` — the
-     `candidates` entries are usable as-is, already de-duplicated. If the file is missing, treat it
-     as empty progress and move to the next bullet rather than stopping.
-   - **Resume the SAME agent with `SendMessage`, addressed to the agent ID the original dispatch
-     returned — never `Agent` and never `ScheduleWakeup`.** Confirmed 2026-09-08: the orchestrator
-     first called `ScheduleWakeup` (that tool schedules the orchestrator's own next wakeup, not a
-     subagent resume, and errored immediately) and then called `Agent` again, which spawns a brand
-     new agent with zero memory of the discovery run in progress — a wasted dispatch that had to be
-     discarded before the real recovery could happen. `SendMessage` is the only tool that continues
-     the original agent's own context; tell it to stop searching immediately and return its JSON
-     right now with whatever it already has (merging in the checkpoint file's progress if the file
-     has more than its own memory does). Its `maxTurns` budget is per-invocation, so a resumed agent
-     gets fresh room to write up.
-   - Only after both come back empty should you conclude the run genuinely found no candidates,
-     and say so plainly in your final report along with the fact that the agent was cut off.
+2. **If it comes back empty or cut off mid-sentence, do not treat that as "no candidates found" and
+   do not resume it — read its checkpoint file and use that as the final result directly.** This
+   agent has hit its `maxTurns` ceiling and returned nothing at least SIX times now (2026-08-24,
+   08-26, 09-08, 09-12, 09-13, 09-18). A cutoff is a hard harness-level stop: the agent has zero
+   turns left to react to it, so it cannot itself notice the ceiling and hand back gracefully — the
+   checkpoint file is what makes recovery possible at all, and it is enough on its own. When the
+   agent completes with no `candidates` array, or its reply ends mid-sentence:
+   - **Read `/tmp/pestidev-discovery-candidates.json`.** The agent checkpoints its full progress
+     there after EVERY query — not only when a candidate passes — so the file is written even on a
+     genuinely dry stretch (confirmed 2026-09-08: a run whose every hit was already known found the
+     file missing under the old candidates-only checkpoint, because nothing had ever passed to
+     trigger a write). It holds a JSON object with `bucketsUsed`, `candidates`, `checkedAgainst`,
+     `droppedAsKnown`, `droppedAsExcluded` and `inProgress: true` — this is the SAME shape as the
+     agent's normal return schema, minus `inProgress` and `note`. If the file is missing, treat it as
+     empty progress (0 candidates, `checkedAgainst: 0`) rather than stopping.
+   - **Use the checkpoint's `candidates` as-is and move straight to step 3.** They are already
+     de-duplicated exactly like a normal return would be — do not spend a turn re-verifying them by
+     hand, and do not `SendMessage` the agent to ask it to repackage what the file already has into
+     prose. A live round-trip buys nothing here (the file already has everything a resumed reply
+     would send back) and costs several of your own turns spent polling/waiting for it to land — a
+     cost this recovery path exists specifically to avoid. (A now-superseded version of this section
+     called for resuming via `SendMessage` instead; confirmed 2026-09-08 that calling `ScheduleWakeup`
+     or a fresh `Agent` dispatch for this is always wrong — `ScheduleWakeup` only reschedules your own
+     wakeup, and a new `Agent` call spawns a blank agent with zero memory of the run in progress — but
+     the checkpoint file makes even the *correct* resume unnecessary, not just those two mistakes.)
+   - Note in your final report that the agent was cut off and its result came from its checkpoint,
+     with the `bucketsUsed` count so it's clear how much of a rotation actually completed.
 3. **For each candidate it returns, dispatch `site-processor`** — sequentially, decrementing the
    budget after each one per the budget rule above. **Re-check each candidate's company and domain
    against `permanentlyRejected`, the exclusion list and the eight `ats-crawl` hosts

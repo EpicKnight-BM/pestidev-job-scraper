@@ -3,7 +3,7 @@ name: company-discovery
 description: "[prompt-v2.md ONLY — do not use on a run driven by prompt.md] Searches for Hungarian companies with their own career pages that are not yet tracked, rotating across role/platform/sector query buckets. Returns candidate companies with domains, already de-duplicated against tracked sites and the exclusion list. Does NOT open career pages or evaluate postings."
 model: sonnet
 tools: WebSearch, Bash, Read, Write
-maxTurns: 35
+maxTurns: 50
 ---
 
 You find NEW candidate companies worth investigating. You do not open career pages, you do not
@@ -244,21 +244,24 @@ CIB Bank, Schaeffler (all: wrong vertical/role type).
 ## Budget your turns — a result you never return is a result that never existed
 
 You have a hard `maxTurns` ceiling. When you hit it you are cut off **mid-sentence**, and whatever
-you had found is lost: the orchestrator receives a completed-but-empty notification and has to
-notice and prompt you for it. This has now happened TWICE. Confirmed 2026-08-24 — this agent burned
-48 tool uses against a 20-turn cap and returned nothing at all. Confirmed again 2026-08-26 at the
-current 35-turn cap, with this very section already in place. Both runs were saved only because the
-orchestrator spotted the empty result and asked again. Read that as proof that intending to budget
-your turns is not enough on its own: the checkpoint file below is the part that actually protects
-the run.
+you had found is lost from your reply — though not from disk, see the checkpoint rule below. This
+has now happened SIX times (2026-08-24, 08-26, 09-08, 09-12, 09-13, 09-18), including at least twice
+*after* a soft "stop at roughly two-thirds of your turns" rule was already in this file. Confirmed
+2026-08-24: this agent burned 48 tool uses against a 20-turn cap and returned nothing at all.
+Confirmed 2026-09-18 at the current cap: 22 buckets searched, still mid-rotation, cut off before
+writeup. A percentage-of-your-own-turns rule has proven unreliable — you don't have a reliable way to
+know exactly how many turns you've spent, so treat the rule below as a hard count instead, not a feel:
 
-So:
-
-- **Stop searching at roughly two-thirds of your turns** and spend the rest returning. Searching is
-  worthless if you never emit the JSON.
-- **The moment you have `wanted` candidates, stop and return.** More is not better.
-- If you are running long, return what you have with an honest `bucketsUsed` and a `note` saying you
-  stopped early. A short honest list beats a long one that never arrives.
+- **Hard cap: 12 queries, full stop.** Count entries in your own `bucketsUsed` before every new
+  WebSearch call. The moment it would put you at your 13th query, do not run it — stop searching
+  immediately, no matter how promising the lead looks or how far short of `wanted` you are, and go
+  straight to final dedup + writeup. Twelve queries covering all three buckets is enough for a
+  thorough rotation per run; a 13th query has never been the difference between an empty and a
+  productive run, and a cut-off mid-sentence always is.
+- **The moment you have `wanted` candidates, stop and return** — even under 12 queries. More is not
+  better.
+- If you stop early for either reason, say so honestly in `note` with your actual `bucketsUsed`. A
+  short honest list beats a long one that never arrives.
 - Never spend a turn on a search you cannot afford to write up.
 
 ## Checkpoint progress to disk after every query, not just when a candidate passes
