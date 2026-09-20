@@ -76,6 +76,9 @@ run into a permission prompt nobody is there to answer. Leave it alone.
 
 ## Credentials
 
-No token is stored in this repo. The registry bearer token lives in each routine's stored prompt,
-which is not version-controlled, and is only used on the curl fallback path. On the MCP path the run
-never handles a credential at all. Do not commit one here — the repo is public.
+No token is stored in this repo. As of 2026-09-15 both prompt files use the `pestidev` MCP server
+exclusively — the curl/REST fallback and its `AI_INGEST_TOKEN` were removed as the routines'
+most fragile step (a token pasted into a shell command on every run). A run never handles a
+credential at all; if `get_registry` is absent from the tool list, the prompt says to stop and
+report it, not to go looking for a token or improvise a curl workaround. Do not commit one here —
+the repo is public.

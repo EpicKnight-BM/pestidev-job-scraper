@@ -125,6 +125,21 @@ their tenant from any other company on that host. Each run caught and self-corre
 before submitting, at the cost of wasted discovery budget. Fixed by writing the full tenant path
 (`join.com/companies/kfs1`) instead of the bare host.
 
+## `www.`-prefix domain mismatches in the known-domains dedup (`prompt-v2.md`, `company-discovery.md`)
+
+**Confirmed 2026-09-20 (run `cse_01VdsjjGybKcs61QcRPEXWFL`)** — AiCAN re-surfaced as a "new"
+discovery candidate even though it was already tracked (`sites.aican.url` is
+`https://www.aican.hu/karrier/`), because the known-domains file preserved the registry's stored
+`www.` prefix verbatim while `company-discovery`'s search returned the bare `aican.hu` — two
+strings that are the same site but differ as text, which an exact `grep -qxF` never equates. The
+orchestrator's mandatory post-discovery cross-check against the live registry caught it before
+submission, so nothing bad went out, but the discovery budget was spent re-investigating a company
+already on the board. Fixed by stripping a leading `www.` from ordinary (non-shared-ATS-host)
+hostnames on both ends: the orchestrator writes `knownDomainsFile` without it, and
+`company-discovery` strips it from its own candidate domain before the `grep -qxF` check. This is
+the same class of gap as the join.com tenant-path fix above, just for the common case instead of
+the shared-ATS one — see INCIDENTS.md § join.com tenant collisions in the known-domains file.
+
 ## `storedListingUrls` dispatch field must be named exactly, and its absence must be loud (`site-change-check.md`, `prompt-v2.md`)
 
 **2026-09-02 (run `cse_01UZLKkW6NMYxuJraYEq79pk`)** — the orchestrator's dispatch omitted the
