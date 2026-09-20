@@ -263,15 +263,20 @@ With remaining budget:
    `personio.com`, `workable.com`, `breezy.hr`, `join.com`, `karrierportal.hu`, `hrfelho.hu` — the
    same list `company-discovery.md` uses) write the hostname PLUS the tenant path, e.g.
    `join.com/companies/kfs1`, never the bare host `join.com` alone — the tenant slug is the actual
-   identity there, and `company-discovery` matches whole-line against exactly this shape. For every
-   other site, the bare hostname is fine. Do the same for each `permanentlyRejected` record's
-   `domain` (fall back to `company` when a record has no `domain`). Write the result to
-   `/tmp/pestidev-known-domains.txt`, and pass that path.
+   identity there, and `company-discovery` matches whole-line against exactly this shape. **For
+   every other site, write the bare hostname with any leading `www.` stripped** (`www.aican.hu` →
+   `aican.hu`) — `grep -qxF` is an exact whole-line match, so a stored `www.`-prefixed hostname
+   silently fails to match a candidate the discovery agent finds without it, and vice versa. Do the
+   same for each `permanentlyRejected` record's `domain` (fall back to `company` when a record has
+   no `domain`). Write the result to `/tmp/pestidev-known-domains.txt`, and pass that path.
 
    A lone `join.com` line can't tell one tenant apart from any other company on that host — writing
    the full tenant path is what closes that gap, rather than relying on the orchestrator to keep
    catching it by hand (confirmed recurring bug, same three join.com tenants each time; see
-   INCIDENTS.md § join.com tenant collisions in the known-domains file).
+   INCIDENTS.md § join.com tenant collisions in the known-domains file). A `www.`-prefixed hostname
+   is the same kind of gap for ordinary sites — stripping it before writing is what closes that one
+   (confirmed 2026-09-20, AiCAN re-surfaced as "new" this way; see INCIDENTS.md § `www.`-prefix
+   domain mismatches in the known-domains dedup).
 
    **Do not paste the list into the dispatch prompt.** It is ~900 lines, and an inline list that size
    is one the dispatch will drop under its own weight (confirmed 2026-09-02 — see INCIDENTS.md §

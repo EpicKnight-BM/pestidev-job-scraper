@@ -121,6 +121,16 @@ see INCIDENTS.md § Domain dedup — re-checking an already-tracked site ahead o
 `job-boards.greenhouse.io/gravity/jobs/8048230` and `job-boards.greenhouse.io/gravity` are the SAME
 tracked site.
 
+**Strip a leading `www.` from a candidate's domain before checking it, on ordinary (non-shared-ATS)
+sites.** `www.aican.hu` and `aican.hu` are the same site, but `grep -qxF` is an exact whole-line
+match and will not equate them on its own. `knownDomainsFile` is written with `www.` already
+stripped from ordinary hostnames, so normalize the candidate the same way first —
+`candidate_domain=$(echo "$raw_domain" | sed 's/^www\.//')` — then run the `grep -qxF` check against
+that. A candidate that only looks new because of a `www.` prefix difference is a false positive
+(confirmed 2026-09-20 — AiCAN re-surfaced as a "new" candidate this way; see INCIDENTS.md §
+`www.`-prefix domain mismatches in the known-domains dedup). This does not apply to the shared-ATS
+tenant paths below — those never carry a `www.` prefix to begin with.
+
 ### On a SHARED ATS host, the slug IS the identity — do not drop a whole platform
 
 This is the opposite error and it is just as real (confirmed 2026-08-24 — a run threw away 10
