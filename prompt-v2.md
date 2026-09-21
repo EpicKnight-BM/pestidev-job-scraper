@@ -49,12 +49,13 @@ shows.
 **`check_titles` is different from the other two: `site-processor` can call it too.** It is the one
 deliberate exception to "no subagent ever gets either transport" below — it is read-only, costs no
 upload budget, and cannot submit or write anything, so it is in `site-processor`'s own `tools:`
-frontmatter (see that agent's Step B.5). You (the orchestrator) never call it yourself; it exists so
-`site-processor` can drop a title that would bounce at `submit_findings` time — not IT-relevant per
-the live `job_categories` keywords, or a cross-source duplicate — BEFORE spending a detail-page fetch
-on it, using the exact same gates the API applies at insert time. There is no REST fallback for it;
-if the MCP connector is not registered, `site-processor` simply skips this pre-check and falls
-through to evaluating every posting itself, same as before it existed.
+frontmatter (see that agent's Step B.5). It exists so `site-processor` can drop a title that would
+bounce at `submit_findings` time — not IT-relevant per the live `job_categories` keywords, or a
+cross-source duplicate — BEFORE spending a detail-page fetch on it, using the exact same gates the
+API applies at insert time. There is no REST fallback for it; if the MCP connector is not registered,
+`site-processor` simply skips this pre-check and falls through to evaluating every posting itself,
+same as before it existed. **You (the orchestrator) have it too, and use it yourself for exactly one
+thing** — the bulk non-IT batch pre-screen in Step 2 below — never otherwise.
 
 `get_registry` returns the registry snapshot as JSON text in its result content — the identical
 object the GET wrote to `registry.json`. `submit_findings` returns the identical `{ok, ingested,
@@ -81,9 +82,10 @@ handle it with the Step 4 response rules, and never retry it in a loop.
 neither of those two in their frontmatter and no MCP credential of their own, so they structurally
 cannot read or write the registry. You make every `get_registry` / `submit_findings` call in this
 run. **`check_titles` is the one exception** — `site-processor` has it in its own `tools:`
-frontmatter, deliberately, because it is read-only and spends no budget. You never call
-`check_titles` yourself; it is `site-processor`'s own pre-fetch filter, not part of your Step 1/Step
-4 workflow.
+frontmatter, deliberately, because it is read-only and spends no budget. You mostly leave it to
+`site-processor`'s own pre-fetch filter, with one deliberate carve-out: Step 2's bulk non-IT batch
+pre-screen calls it yourself, directly, before deciding whether to dispatch `site-processor` at all.
+It is never part of Step 1 or Step 4.
 
 ## Step 1 — GET your memory AND your upload budget
 
@@ -226,6 +228,26 @@ For every REMAINING entry in `sites` whose `lastChecked` is more than 7 days ago
      rejected, and re-judging an unchanged posting on a schedule is pure waste. This is also what
      stops previously-rejected postings that still sit on the listing from being silently re-read
      every single re-check forever.
+
+     **Exception — a large `newUrls` batch that is a bulk non-IT vertical ★** If `newUrls` has 15 or
+     more entries, do not dispatch `site-processor` blind. First derive a rough title per URL by
+     de-slugging its last path segment (URL-decode it, swap `-`/`_` for spaces), then call
+     `check_titles` YOURSELF — you have this tool too, see "How you reach the API" above — with one
+     `{title, company}` candidate per URL, `company` being the site's registered company name. If
+     EVERY result comes back `itRelevant: false`, this is a bulk non-IT posting batch (a
+     cleaning/security staffing run, a sales/retail hiring wave, etc. — the company's whole vertical
+     at this listing isn't IT, not a title-level miss on an otherwise mixed page): skip the
+     `site-processor` dispatch for this batch, and record the site in `sitesChecked` as usual (status
+     reflecting no fit, the full `currentListingUrls`) so `lastChecked` still advances — this is not a
+     `rejected` entry, since the listing can change again next week and deserves a fresh look then.
+     Name it in your final report (site + count + "0/N itRelevant, skipped processor") so the skip is
+     auditable, since a de-slugged title is a guess. **If even ONE result comes back `itRelevant:
+     true`, or a candidate's de-slugged guess is too mangled for `check_titles` to judge, fall back to
+     the normal path and dispatch `site-processor`** — never suppress a batch on an unclear signal; a
+     missed real posting is worse than one wasted dispatch. Confirmed 2026-09-21: `bnref` (24 new
+     URLs, all cleaning/security roles) and `bydeurope` (32 new URLs, all EU sales/marketing roles)
+     both hit `changed: true` and got skipped by hand instead of this check, as a one-off time-budget
+     call — see INCIDENTS.md § Bulk non-IT posting batches wasting a re-check dispatch.
    - **`unreachable_timeout`** — record it with that status and the `listingUrls` you already had.
 3. **Always store the CURRENT full `listingUrls` set** in that site's `sitesChecked` entry — every
    URL on the page right now, not just the new ones. That is what next run's comparison diffs
