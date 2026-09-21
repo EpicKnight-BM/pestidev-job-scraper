@@ -140,6 +140,23 @@ hostnames on both ends: the orchestrator writes `knownDomainsFile` without it, a
 the same class of gap as the join.com tenant-path fix above, just for the common case instead of
 the shared-ATS one — see INCIDENTS.md § join.com tenant collisions in the known-domains file.
 
+## Bulk non-IT posting batches wasting a re-check dispatch (`prompt-v2.md`)
+
+**2026-09-21 (v2 run `cse_01MgSAqAALY5RzvN7RDt8QmP`)** — a Step 2 re-check found `changed: true` for
+`bnref` (24 new URLs, all cleaning/security roles) and `bydeurope` (32 new URLs, all EU
+sales/marketing roles). Both are companies whose business vertical at this listing structurally
+isn't IT, not a title-level miss on an otherwise mixed page — but the plain `changed: true` rule as
+written sends any such batch straight to `site-processor` for a full detail-page pass regardless. The
+orchestrator caught it by eye and skipped the dispatch as a one-off time-budget call, logging the
+reasoning honestly rather than hiding it, but the same 56 postings would cost a full pass again the
+next time either listing changes, since nothing recorded that the batch was bulk non-IT. Fixed by
+adding a `check_titles` pre-screen for any `newUrls` batch of 15+: de-slug a rough title per URL and
+run them all through `check_titles` (the orchestrator already has this tool in its own list, not only
+`site-processor`) before dispatching — skip `site-processor` only if every single result comes back
+`itRelevant: false`, and fall back to a normal dispatch on any unclear or positive result. The site
+still gets a normal `sitesChecked` entry either way, so `lastChecked` advances and a genuinely new IT
+role on a future recheck of the same listing is not missed.
+
 ## `storedListingUrls` dispatch field must be named exactly, and its absence must be loud (`site-change-check.md`, `prompt-v2.md`)
 
 **2026-09-02 (run `cse_01UZLKkW6NMYxuJraYEq79pk`)** — the orchestrator's dispatch omitted the
