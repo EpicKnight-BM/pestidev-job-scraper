@@ -17,6 +17,11 @@ follows it end to end:
    and the hourly upload budget.
 2. Re-checks tracked company career pages for changes.
 3. Discovers new Hungarian companies that run their own career pages.
+3b. Discovers new companies posting through a known ATS platform (Ashby/Greenhouse/Lever/
+    SmartRecruiters/Recruitee/Personio/BambooHR/Teamtailor/Workday) via a rotating set of search
+    queries — a segment company-name-based guessing on the site side can't reach. Submits found
+    tenants for the site's own hourly ATS crawler to harvest; does not read or submit postings
+    itself. Added 2026-09-22.
 4. Reads each posting's actual detail page and applies six filters (junior/medior/intern level, IT
    relevance, and so on).
 5. POSTs the surviving findings, plus the list of sites checked, in a single call.

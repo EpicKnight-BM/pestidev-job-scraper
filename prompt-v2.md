@@ -355,6 +355,33 @@ With remaining budget:
 Do not second-guess the discovery agent's de-duplication by re-searching yourself, and do not open
 a candidate's career page inline — dispatch the processor.
 
+## Step 3b — ATS-tenant discovery (independent of the above, no budget)
+
+**2026-09-22.** A separate discovery channel from Step 3: instead of finding companies with their
+own career pages, this finds companies posting through an ATS platform the site's own hourly
+`ats-crawl` worker doesn't know about yet (Ashby/Greenhouse/Lever/SmartRecruiters/Recruitee/
+Personio/BambooHR/Teamtailor/Workday) — a segment slug-guessing from known company names structurally
+can't reach (Workday especially: its tenant URL has three independent unknowns, unguessable, only
+findable by actually seeing one). This is YOUR call, not `company-discovery`'s — it costs no upload
+budget and needs nothing the orchestrator doesn't already have (you have `WebSearch` yourself).
+
+1. Call `get_ats_discovery` once. It returns `suggestedQueries` (a handful, already rotated for
+   today — you don't choose), `tenants` (already-tracked boards) and `knownMisses` (slugs already
+   confirmed not to exist) so you don't waste a search re-finding what's already known.
+2. Run each `suggestedQueries` entry through `WebSearch`.
+3. From the results, pull out actual ATS **posting** URLs on one of the `supportedProviders` domains
+   (e.g. `jobs.ashbyhq.com/<company>/<id>`, `<company>.wd5.myworkdayjobs.com/.../job/...`) — never a
+   company's own career-page URL, and never a bare listing/search page. Skip anything whose slug is
+   already in `tenants` or `knownMisses`.
+4. Call `submit_ats_tenants` once with everything you collected: `{"urls": [...]}`. The server
+   verifies every slug live before accepting it, so `notFound` entries are normal, not a mistake.
+5. Note the `added`/`alreadyKnown`/`notFound`/`rejected` counts in your final report.
+
+This never touches `site-processor`, `sitesChecked`, or the upload budget — an accepted tenant is
+harvested for postings later by the site's own `ats-crawl` worker on its own schedule, not by this
+routine. Skip this step (do not let it block Step 4) if you are already past the 40-minute mark from
+THE TIME RULE above.
+
 ## Step 4 — map technology labels, then SUBMIT
 
 `site-processor` returns `techMentions` as FREE TEXT — the technologies each posting actually names,
@@ -474,7 +501,7 @@ entire report.
 
 Then a short plain-text summary. For EVERY site touched this run (re-check or new discovery), state **"found N postings, M IT-relevant, K passed the level filter, submitted J"** — these come straight from each `site-processor`'s `postingsFound` / `itRelevant` / `passedLevel` fields. A site entry with no N is an incomplete check; say so plainly rather than omitting it. A `site-change-check` that returned `changed: false` reports as "unchanged, N URLs on listing, 0 opened".
 
-Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — whether the tool result was `ok:true` or `isError`, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
+Then: how many known sites you re-checked and their results, how many new companies were investigated and their outcomes, the exact list of any NEW findings submitted (title/url/company/level), and the API's response — whether the tool result was `ok:true` or `isError`, how many rows it accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero. Also report Step 3b's `submit_ats_tenants` counts (`added`/`alreadyKnown`/`notFound`/`rejected`), or say you skipped it and why.
 
 If `skippedNonIt` or `skippedSenior` came back non-zero, give it its own line — name the specific title(s), read straight off `results` (per the lookup rule above, not attributed by guessing), and if it's a new title shape not already in site-processor.md's "Known API-rejected title shapes" list, say plainly that it's worth adding. Reading `results` is now the only way that list grows accurately — the API tells you exactly which row it dropped and why, so there is no excuse for adding a shape from a guess.
 

@@ -32,13 +32,15 @@ copied out of the run instruction into a shell command on every single run); it 
 | `get_registry` | Step 1's GET | none — `{}` |
 | `submit_findings` | Step 4's POST | `{ findings, sitesChecked, rejected }` — the exact same JSON body the old REST POST took |
 | `check_titles` | (new, no REST equivalent) | `{ candidates: [{title, company}] }` — read-only title pre-check, see "Pre-check with `check_titles`" below |
+| `get_ats_discovery` | `ats-tenants.mjs`'s GET | none — `{}` — see "Step 3b" below |
+| `submit_ats_tenants` | `ats-tenants.mjs`'s POST | `{ urls: [...] }` — see "Step 3b" below |
 
 This repo's `.mcp.json` registers the server under the name **`pestidev`**, so the tools appear as
-`mcp__pestidev__get_registry`, `mcp__pestidev__submit_findings` and `mcp__pestidev__check_titles`,
-and all three are pre-approved in `.claude/settings.json`. If the connector was registered on the
-environment under a different name, the prefix differs but the tool's own name does not — match on
-`get_registry` / `submit_findings` / `check_titles` and use whatever prefix your tool list actually
-shows.
+`mcp__pestidev__get_registry`, `mcp__pestidev__submit_findings`, `mcp__pestidev__check_titles`,
+`mcp__pestidev__get_ats_discovery` and `mcp__pestidev__submit_ats_tenants`, and all five are
+pre-approved in `.claude/settings.json`. If the connector was registered on the environment under a
+different name, the prefix differs but the tool's own name does not — match on the tool name and use
+whatever prefix your tool list actually shows.
 
 `get_registry` returns the registry snapshot as JSON text in its result content — the identical
 object the old REST GET returned. `submit_findings` returns the identical `{ok, ingested, results,
@@ -230,10 +232,16 @@ With remaining budget, look for companies in NEITHER `sites` NOR `permanentlyRej
 On those eight hosts ONLY:
 - **Never search them.** They are gone from the by-platform bucket above for this reason.
 - **Never investigate a candidate whose postings live there.** Skip it the moment you recognise the host — no listing fetch, no sitemap, no detail page, no counting. Same free skip as the known-broken platforms above, for the opposite reason: not "this can't be read" but "this is already being read, hourly, by something else".
+- **But before you skip — if this is a company you have NOT seen before (not in `sites`,
+  `permanentlyRejected`, or already reported this run), save the posting URL you just found into a
+  running list for Step 3b below instead of just discarding it.** You already paid for this search
+  result; whether its board is already in `ats_tenants` (nothing to do) or genuinely new (closes the
+  gap two paragraphs down) is exactly what `submit_ats_tenants` figures out — you don't need to know
+  which case you're in before sending it.
 - **Retire the ones already in `sites`.** Send each ONE time under `rejected` as a structured record naming the source (e.g. `{"slug":"datapao","domain":"job-boards.eu.greenhouse.io","company":"DATAPAO","reason":"covered by the board's own ats-crawl source"}`), and never send a `sitesChecked` entry for it again. Once its `slug` is in `permanentlyRejected` it is out of the rotation for good, and re-sending it only piles up near-duplicate entries — the same rule as every other permanent rejection.
 - **Judge by where the POSTING URL lives, not where the career page lives.** A company's own `/karrier` page that links out to a Greenhouse board is still the crawler's work: the URLs you would submit are `job-boards.greenhouse.io/...`, which is exactly what it already holds. The site is yours only when the posting URLs sit on the company's own domain.
 
-**The one known gap — recognise it, do not "fix" it.** The crawler only harvests slugs already in its `ats_tenants` table (seeded from ~64 companies, grown by a separate worker that derives slug guesses from company names ALREADY in the board's database), so a brand-new company on one of those eight platforms can sit uncrawled for a while. Closing that gap is a site-side job — the `ats-tenants` intake endpoint exists for exactly it — and is NOT a licence to hand-scrape the host anyway. Skipping these four is a deliberate division of labour, not an oversight for you to work around.
+**The one known gap, and how it's closed (2026-09-22).** The crawler only harvests slugs already in its `ats_tenants` table (seeded from ~64 companies, grown by a separate worker that derives slug guesses from company names ALREADY in the board's database), so a brand-new company on one of those eight platforms — or on Workday, which isn't one of the eight at all — could sit uncrawled indefinitely. This is NOT a licence to hand-scrape the host. It's also no longer just "someone else's problem": see Step 3b below, which is this routine's own way of closing it, via `get_ats_discovery`/`submit_ats_tenants`.
 
 **`karrierportal.hu` and Hireify are NOT dead — a past run wrongly blacklisted them.** A 2026-08-04
 audit proved the old "confirmed dead" verdict false and recovered 10 real junior/medior IT
@@ -248,6 +256,33 @@ TEXT and actually scan for `<a href>` links to job detail URLs before assuming t
 don't stop at "the visible design looks like a JS app", (2) check `sitemap.xml` per the existing
 rule above, (3) for a company on an ATS that is still yours to scrape (join.com, Workable, Breezy),
 the public board API or JSON feed is worth one try even when the board's own page seems broken.
+
+## Step 3b — ATS-tenant discovery (independent of Step 3, no upload budget)
+
+**2026-09-22.** Finds companies posting through an ATS platform the board's own hourly `ats-crawl`
+worker doesn't know about yet — a segment slug-guessing from known company names structurally can't
+reach (Workday especially: its tenant URL has three independent unknowns, unguessable, only findable
+by actually seeing one). This costs no upload budget and takes only a few extra `WebSearch` calls —
+do it once per run, alongside Step 3, not instead of it.
+
+1. Call `get_ats_discovery` once. It returns `suggestedQueries` (a handful, already rotated for
+   today), `tenants` (boards already tracked) and `knownMisses` (slugs already confirmed not to
+   exist) — you don't need to choose queries or remember what you tried last time.
+2. Run each `suggestedQueries` entry through `WebSearch`.
+3. Combine what you find there with anything you already collected per the "save the posting URL...
+   instead of just discarding it" rule above (Step 3's eight-host skip). From all of it, pull out
+   actual ATS **posting** URLs (e.g. `jobs.ashbyhq.com/<company>/<id>`,
+   `<company>.wd5.myworkdayjobs.com/.../job/...`) — never a company's own career-page URL, never a
+   bare listing/search page. Skip anything whose slug is already in `tenants` or `knownMisses`.
+4. Call `submit_ats_tenants` once with everything you collected: `{"urls": [...]}`. The server
+   verifies every slug live before accepting it, so `notFound` entries in the response are normal,
+   not a mistake on your part.
+5. Note the `added`/`alreadyKnown`/`notFound`/`rejected` counts in your final report.
+
+This never touches `submit_findings`, `sitesChecked`, or the upload budget — an accepted tenant is
+harvested for postings later by the site's own `ats-crawl` worker on its own schedule, not by this
+run. Skip this step entirely (never let it block Step 4) once you're past the 40-minute mark from the
+clock rule elsewhere in this file.
 
 ## ⚠ MANDATORY: count before you filter — this is not optional ★
 
@@ -429,7 +464,9 @@ count-before-filter rule above — a site entry with no N is an incomplete check
 than omitting it. Then: how many known sites you re-checked and their results, how many new companies you
 investigated and their outcomes, the exact list of any NEW findings you submitted (title/url/company/level),
 and the API's response — whether the tool result was `ok:true` or `isError`, how many rows it
-accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero.
+accepted per source versus how many you sent, and `rateLimit.throttled` if non-zero. Also report Step
+3b's `submit_ats_tenants` counts (`added`/`alreadyKnown`/`notFound`/`rejected`), or say you skipped it
+and why (past the 40-minute mark, or nothing found).
 If the submit failed for any reason, say so explicitly and prominently: that means this run saved nothing.
 
 **If the submit failed after all retries, print the complete submission payload verbatim** in a
