@@ -458,6 +458,17 @@ them to any canonical list and do not invent any — the orchestrator owns that 
 canonical keyword list. If the posting names no technologies, return an empty array. An empty array
 is correct and normal.
 
+**Also append one entry for the posting's spoken/written language** — this is not optional the way
+a missing tech stack is: every hand-written scraper on the board tags this on every posting it
+ingests, and AI-scraped rows currently don't, which is a known, visible gap (postings show a full
+tech-stack chip row but never a language chip). Add the plain language name (`Hungarian`, `English`,
+`German`, etc.) as one more `techMentions` entry when either is true: (1) the posting explicitly
+states a language requirement ("angol nyelvtudás", "English: B2"), or (2) the posting's own body
+text is simply written in that language, with no requirement line at all. Case (2) covers the common
+case — most postings on this board are ordinary Hungarian prose with nothing stated about language,
+and those still need `Hungarian` here, exactly as an English-written posting with no requirement line
+still needs `English`. You are reading the actual page, so judge this directly rather than guessing.
+
 ## Return exactly this JSON, nothing else
 
 ```json
