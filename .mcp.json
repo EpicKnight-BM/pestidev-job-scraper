@@ -2,7 +2,7 @@
   "mcpServers": {
     "pestidev": {
       "type": "http",
-      "url": "https://bakan7.netlify.app/.netlify/functions/ai-mcp",
+      "url": "https://pestidev-ai-mcp.bak-andrs.workers.dev",
       "headers": {
         "Authorization": "Bearer ${AI_MCP_TOKEN}"
       }
