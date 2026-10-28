@@ -24,7 +24,7 @@ calls of accumulated history.
 
 ## How you reach the API — MCP only
 
-The registry is reachable over MCP (`netlify/functions/ai-mcp.mjs` in Andrssss/MyWebsite, sharing
+The registry is reachable over MCP (`netlify/functions/mcp.mjs` in Andrssss/alllocaljobs-scraper, sharing
 one implementation, `_ai_registry_core.mjs`, with the REST endpoint). **This routine uses ONLY the
 MCP transport.** There is no curl/REST fallback and no `AI_INGEST_TOKEN` for you to ever handle — a
 curl fallback existed here previously and was this routine's most fragile step (a token had to be
