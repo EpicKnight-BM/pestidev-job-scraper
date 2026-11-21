@@ -20,7 +20,7 @@ history, or your instructions.
 
 **The one exception is `check_titles`, added 2026-09-08.** It IS in your `tools:` frontmatter,
 deliberately: it is read-only, costs no upload budget, and cannot submit or write anything — it just
-answers, for a batch of titles, whether each one would pass the API's own IT-relevance/senior-title
+answers, for a batch of titles, whether each one would pass the API's own IT-relevance/denylist
 gates and whether it is a cross-source duplicate. Same isolation boundary as always (your frontmatter
 IS what decides which registry-adjacent tool you can reach, not a separate credential per tool), just
 extended to cover this one safe read. See Step B.5 below for when and how to call it. Your entire
@@ -139,8 +139,8 @@ union of everything reachable (confirmed miss, 2026-08-01 — see INCIDENTS.md �
   `curl https://karrier.alfa.hu/jsbq`. Each row's embedded HTML carries schema.org microdata:
   `itemprop="title"` / `aria-label` (job title), `itemprop="address"` (location — use for filter 6),
   `itemprop="experienceRequirements"` (level facet: pályakezdő / szakmai gyakorlat / tapasztalattal
-  rendelkező / vezető — treat `vezető` as senior and skip without reading further; the other three
-  are real candidates worth opening). `?page=2` does NOT work — the endpoint always returns page 1,
+  rendelkező / vezető — all four are real candidates worth opening; since 2026-11-21 senior/`vezető`
+  roles are wanted too, see filter 5). `?page=2` does NOT work — the endpoint always returns page 1,
   ~20 newest rows, regardless of params or cookies. For a site with more than ~20 postings you see
   only the newest batch each run. That is an accepted limitation, still far better than treating the
   site as unreachable.
@@ -241,18 +241,15 @@ tester, IT Business Analyst). All six must be evaluated.
 If `evaluateOnly` was supplied, still enumerate and count the whole listing — but open detail pages
 only for the URLs it names.
 
-## Step B.4 — reject an obvious senior/lead title yourself, for free, before anything else
+## Step B.4 — senior titles are NOT a reject any more (2026-11-21)
 
-Before you spend a `check_titles` call on a posting, look at its bare listing title. If it already
-and unambiguously contains Senior, Lead, Vezető, Manager, Owner, Igazgató, Head of, Chief, Principal
-or Architect (the same word list as filter 4 below), that is a reject — no tool call needed, no
-detail-page fetch needed, this costs nothing. Drop it from what you pass into Step B.5, but still
-count it in `postingsFound`, not in `itRelevant` or `passedLevel`.
-
-This is deliberately the FIRST filter, ahead of `check_titles` and ahead of `knownActiveTitles`: it
-is the cheapest possible check (a plain word match you can do without any tool), so it is the one
-that should eliminate a posting before any of the others get a chance to spend anything on it. Only
-titles that survive this move on to Step B.5.
+Until 2026-11-21 this step dropped every Senior/Lead/Vezető/Manager/… title for free. The owner
+reversed that: the board now carries senior roles from EVERY source, including AI-scraped (the
+API labels them `senior` on insert). So do NOT drop a title just
+because it says Senior, Lead, Head of, Principal, Igazgató, etc. Pass it into Step B.5 like any
+other title — the API's own `job_filters` denylist (which the owner curates by hand) is what still
+rejects the unwanted shapes (support/helpdesk, sales, SAP, non-IT, …), and `check_titles` applies
+exactly that list.
 
 ## Step B.5 — `check_titles`: IT-relevance + duplicate pre-check, BEFORE opening the detail page
 
@@ -261,7 +258,7 @@ time for reasons this check now catches first (full story: INCIDENTS.md § `chec
 catch bounced submissions before a detail-page fetch).
 
 `check_titles` runs the EXACT SAME gates `submit_findings` applies at insert time — same
-`job_categories` keyword match, same `job_filters` senior denylist, same cross-source duplicate
+`job_categories` keyword match, same `job_filters` denylist, same cross-source duplicate
 lookup — so a title that would bounce later gets caught here first, from the title alone.
 
 **Call it ONCE per company, in a single batch**, right after Step A/B enumeration and after Step B.4
@@ -275,7 +272,7 @@ check_titles({ candidates: [{ title: "<listing title>", company: "<company>" }, 
 For each result:
 - **`verdict: "reject"`** — do NOT open its detail page, do not evaluate it against the 6 filters, do
   not include it in `findings`. It still counts in `postingsFound`. Count it in `itRelevant` only if
-  the result's own `itRelevant` field is true (a `senior_title` or `duplicate` rejection can still be
+  the result's own `itRelevant` field is true (a `denylisted_title` or `duplicate` rejection can still be
   a real IT title) — never count it in `passedLevel`, since level was never evaluated. Say how many
   you dropped this way, and why (`reasons`), in `note` (e.g. "3 of 9 dropped by check_titles:
   2 non_it_title, 1 duplicate").
@@ -394,21 +391,20 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    A new confirmed case belongs in this list, not just in a run's own `note` — that is what lets the
    NEXT run's judgment call benefit from this one's, instead of every run rediscovering the same
    pattern from scratch.
-4. **Title carries no senior/lead/management word** — reject any title containing Senior, Lead,
-   Vezető, Manager, Owner (e.g. "Product Owner"), Igazgató, Head of, Chief, Principal, or Architect.
-5. **Level is JUNIOR, MEDIOR, or INTERN/entry-level — NEVER senior.** Judge from title AND body
-   together. RETURN: interns/trainees/gyakornok (`experience`: `diákmunka`), junior roles
-   (`junior`), and mid-level/medior roles (`medior`) — INCLUDING ones described as
-   'tapasztalt'/experienced when they read as ordinary mid-level work (a normal stack, no
-   leadership/architecture ownership). REJECT only clearly SENIOR roles: the body describes senior
-   SCOPE — leads or owns a team, owns the architecture, expert-level breadth across many enterprise
-   technologies, or explicitly demands long/senior seniority. There is NO hard year cutoff — use
-   judgment. A plain "Backend fejlesztő" seeking 'tapasztalt' devs with an ordinary stack is MEDIOR
-   → return as `medior`; a "Backend fejlesztő" who owns the architecture / leads the team / lists
-   dozens of enterprise tools is SENIOR → skip. **A range like "5-10 years" or "5-10 év" is
-   SENIOR** — treat the LOWER bound of any stated range as the real floor, and 5+ at the floor
-   already crosses into senior. Do not be misled by the range including higher numbers into reading
-   it as more lenient than a flat "5+ years".
+4. **Title is not on the denylist** — `check_titles` (Step B.5) already told you this. A
+   seniority word (Senior, Lead, Head of, Principal, Igazgató, …) is NOT a reject on its own since
+   2026-11-21; Manager/Owner/Architect titles count only if the role itself is IT work (e.g.
+   "IT Project Manager", "Product Owner" of a software product, "Solution Architect").
+5. **Level: every level is accepted — intern, junior, medior AND senior (since 2026-11-21).**
+   Judge the level from title AND body together and report it in `levelJudgment`: interns/
+   trainees/gyakornok → `diákmunka`, junior → `junior`, ordinary mid-level work (including
+   'tapasztalt' with a normal stack) → `medior`, and senior scope (leads/owns a team or the
+   architecture, expert breadth, explicitly 5+ years at the floor of any stated range, or a
+   Senior/Lead/Principal title) → `senior`. None of these is a reject. The board stores senior
+   rows labelled `senior`; the API derives that label itself from the
+   title and from `experienceLiteral`, so copy any years phrase ("legalább 5 év", "5-10 years")
+   VERBATIM into `experienceLiteral` — that is what lets a body-only senior get labelled correctly.
+   `passedLevel` therefore equals the number of IT-relevant postings that survived filters 1-4 and 6.
 6. **Location must not be CLEARLY somewhere other than Budapest.** Read the posting for its stated
    work location (an explicit "Helyszín" / "Munkavégzés helye" field, the office address, a city in
    the title/URL, or the company's own single-office address if no city is named). REJECT only when
@@ -454,7 +450,7 @@ independently confirms it — as of 2026-07-23 it no longer trusts even an exact
 this field, because that is exactly how a bare guess with zero textual backing slipped through
 twice (see INCIDENTS.md § `experienceLiteral` must trace to real text, never a guess).
 
-Your judgment IS still what decides accept/reject in filter 5. It is only the literal
+Your judgment still decides `levelJudgment` (filter 5). It is only the literal
 `experienceLiteral` value that must trace back to real text.
 
 ## On `techMentions`
@@ -495,9 +491,9 @@ still needs `English`. You are reading the actual page, so judge this directly r
       "location": "<location text as stated, resolved to a city if only a street address was given (see filter 6), or empty>",
       "experienceLiteral": "<verbatim level word or years phrase, or empty>",
       "techMentions": ["<free-text technologies the posting names>"],
-      "levelJudgment": "junior" | "medior" | "diákmunka",
+      "levelJudgment": "junior" | "medior" | "senior" | "diákmunka",
       "titleApiRisk": <true only on the check_titles-fallback path, per filter 3 — omit or false otherwise>,
-      "why": "<one line: why this passed filter 5. If titleApiRisk is true, also say which recognised token is missing.>"
+      "why": "<one line: why this is a genuine IT posting at the stated level. If titleApiRisk is true, also say which recognised token is missing.>"
     }
   ],
   "rejectReason": "<only when status is reject_permanent — why this site can NEVER work>",

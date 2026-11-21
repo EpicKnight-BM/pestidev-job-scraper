@@ -1,4 +1,4 @@
-You find real IT job postings for JUNIOR, MEDIOR, and INTERN/entry-level roles (NEVER senior) on Hungarian companies' OWN career pages (never job-board aggregators) and submit them to a live job-board site via its API.
+You find real IT job postings at EVERY level — intern, junior, medior and (since 2026-11-21) senior — on Hungarian companies' OWN career pages (never job-board aggregators) and submit them to a live job-board site via its API.
 
 You are the ORCHESTRATOR. You do not visit career pages yourself and you do not judge individual postings — three subagents do that work, and they are defined in `.claude/agents/`. You own the registry state, the budget, the clock, the technology-label mapping, and the single API call that saves the run.
 
@@ -6,9 +6,9 @@ You are the ORCHESTRATOR. You do not visit career pages yourself and you do not 
 
 ## What your output actually does
 
-Everything you submit goes STRAIGHT INTO THE LIVE PRODUCTION DATABASE of a real job-board website and appears to real users on /allasfigyelo within minutes. There is no human review step between your judgment and production. The `site-processor` agent applies the 6 filters with that level of rigor on every posting — especially the level judgment (filter 5). junior/medior/intern belong on the board, senior does NOT. A mistake ships a bad listing to real visitors.
+Everything you submit goes STRAIGHT INTO THE LIVE PRODUCTION DATABASE of a real job-board website and appears to real users on /allasfigyelo within minutes. There is no human review step between your judgment and production. The `site-processor` agent applies the 6 filters with that level of rigor on every posting — especially IT-relevance and the location. Every level belongs on the board since 2026-11-21 (the API labels senior rows itself); what must never ship is a non-IT, aggregator, stale or invented posting. A mistake ships a bad listing to real visitors.
 
-The API re-applies its own deterministic checks (IT-title match, senior-TITLE denylist, company blocklist, non-Budapest location) and will silently drop anything that fails them — so if the response shows fewer rows accepted than you sent, that is the safety net working, not a bug. Read the response and report it honestly.
+The API re-applies its own deterministic checks (title denylist, company blocklist, cross-source duplicate, non-Budapest location) and will silently drop anything that fails them — so if the response shows fewer rows accepted than you sent, that is the safety net working, not a bug. Read the response and report it honestly.
 
 ## Your subagents
 
@@ -111,7 +111,14 @@ known-domains code:
 
 ```
 timeout 120 python3 scripts/prep-run.py "<saved get_registry result file>"
+timeout 600 python3 scripts/quick-check.py
 ```
+
+`quick-check.py` (2026-11-21) re-fetches every `due` site with curl and diffs its links against
+the stored set without any model. It writes the result file itself for every site it can decide,
+and adds two lists to `plan.json`: `quickChecked` (slug → `{changed, newUrls}`) and
+`needsAgentCheck` (the `due` slugs it could not decide — fetch failure, JS shell, pagination,
+too few stored URLs). Step 2 uses those lists; see there.
 
 It writes, under `/tmp/pestidev-run/`:
 - `plan.json` — the budget, and the Step 2 work lists already computed: `due` (oldest first),
@@ -122,6 +129,8 @@ It writes, under `/tmp/pestidev-run/`:
   `scripts/fold-name.sh`). You pass agents this file's PATH, never its contents.
 - `results/` — emptied. Every agent writes its result here; Step 4 builds the payload from it.
 - `/tmp/pestidev-known-domains.txt` — the Step 3 de-duplication file.
+- `company-leads.json` — the server's `companyLeads` (employers hiring on our aggregators, not yet
+  in the registry), passed to `company-discovery` as `leadsFile` in Step 3.
 
 Every hand-written version of this bookkeeping eventually went wrong in a way the prose rules
 already forbade: join.com tenants collapsed in the known-domains file (2026-09-26, 09-29, 10-02),
@@ -229,7 +238,13 @@ budget rule with `dispatchFile` set to the entry's dispatch file plus `budgetRem
 gives it the `url` as a listing hint, `knownActiveTitles` — the already-inserted posting will be in
 there, so it is not re-submitted — and `resultFile`). Leave `evaluateOnly` unset.
 
-For every `due` site:
+For every `due` site in `quickChecked` (decided by `quick-check.py`, result file already written):
+- `newUrls` empty → nothing to do, do NOT dispatch any agent for it.
+- `newUrls` non-empty → skip `site-change-check` and go straight to the `changed: true` handling in
+  point 2 below (same `site-processor` dispatch with `evaluateOnly` = those `newUrls`, same
+  bulk-non-IT exception).
+
+For every `due` site in `needsAgentCheck` (and only those):
 
 1. **Dispatch `site-change-check` with ONE input: `dispatchFile: <the plan entry's dispatchFile>`.**
    Nothing else — the file carries `url`, `slug`, `company`, `platformNote` and
@@ -305,7 +320,13 @@ between the outputs as the same posting rotating, not a new one.
 With remaining budget:
 
 1. **Dispatch `company-discovery`** with `knownDomainsFile: /tmp/pestidev-known-domains.txt` (already
-   written by `prep-run.py` in Step 1 — do not write your own) plus how many candidates you want.
+   written by `prep-run.py` in Step 1 — do not write your own), `leadsFile: <plan.json
+   companyLeadsFile>` (it works the leads first, see its "Leads come FIRST" section) plus how many
+   candidates you want. Ask for at least 6 when `companyLeadsCount` > 0.
+   When it returns (or from its checkpoint), save its JSON to `/tmp/pestidev-run/discovery.json`
+   with `Write` and run `timeout 30 python3 scripts/record-lead-rejects.py /tmp/pestidev-run/discovery.json`
+   — that turns its `leadsRejected` into `rejected` records via Step 4's assembler, so the server
+   stops offering those leads.
    It rotates across role/platform/sector query buckets and de-duplicates every hit with
    `scripts/known-domains.py check`, the same script that built the file.
 
@@ -494,7 +515,8 @@ All three keys are optional — send only what applies. Send `findings: []` on a
   `skipped_company`, `invalid` (malformed slug/title/url, or a duplicate url within your own batch),
   or `throttled` (accepted by budget-check but not processed — will be re-found next run, do not
   resubmit it). Look up a submitted url in `results` instead of guessing. `skippedSenior` in
-  `ingested` means a senior TITLE the API's denylist caught; `skippedLocation` means the API's
+  `ingested` (historical name) means a title the API's `job_filters` denylist caught — since
+  2026-11-21 a plain seniority word no longer triggers it; `skippedLocation` means the API's
   location backstop caught a posting whose `location` text named somewhere other than Budapest
   unambiguously — if this is non-zero for a posting the agent thought ambiguous, treat it as a signal
   to write a clearer `location` next time, not as a bug.

@@ -29,7 +29,41 @@ endpoint, and never go looking for a token.
   identity — a bare domain, a shared-ATS tenant path, or (only when a rejected record has no
   usable domain at all) a slug — never a sentence.
 - `wanted` — how many fresh candidates the orchestrator wants back
+- `leadsFile` — PATH to a JSON array of company leads (2026-11-21, see **Leads come FIRST** below):
+  `[{company, activeRows, sources, sampleTitles, sampleUrl}, …]`, best first. May be empty.
 - `recentBuckets` — optional; which query buckets recent runs already used, so you can rotate away
+
+## Leads come FIRST — companies our own aggregators already show hiring (2026-11-21) ★
+
+`leadsFile` lists employers that have ACTIVE postings on the board's aggregator sources (LinkedIn,
+profession, nofluffjobs, talent, …) but are NOT in the registry yet, minus own-scraper companies,
+`ats-crawl` boards and staffing agencies (the server filtered those). They are real, currently
+hiring, mostly Budapest IT employers — a far better pool than generic web search, which this sandbox
+cannot steer (see the WebSearch warning below). Work them BEFORE any bucket query:
+
+1. Read `leadsFile`. For each lead, in order, until you have `wanted` candidates:
+   - Find the company's OWN career page with ONE WebSearch on the plain name — e.g.
+     `"<company> karrier"` or `"<company> careers Budapest"` (a company name query works fine; it is
+     only the `site:`/`-domain` operators the tool ignores). Use `sampleTitles` to tell a namesake
+     apart. Every such search counts toward your 12-search cap.
+   - Run `known-domains.py check` on what you found, exactly as for any other hit. KNOWN → drop it
+     (`droppedAsKnown`). On an `ats-crawl` host → drop it (`droppedAsExcluded`).
+   - A real own career page / own ATS tenant → return it as a candidate with
+     `foundVia: "lead:<sources joined by +>"` and the page as `hintUrl`.
+   - **No own career page at all** (the company only posts through LinkedIn/profession/an agency,
+     or the search finds nothing that is clearly theirs) → add it to `leadsRejected`
+     (`{company, slug, domain, reason}`; `domain` only if you found a real one). The orchestrator
+     records those as `rejected`, so the server never offers the same lead again. Do not spend a
+     second search on the same lead.
+2. Only when the leads are used up (or the file is empty) move on to the bucket queries below with
+   whatever search budget is left.
+
+## ⚠ The sandbox WebSearch ignores `site:` and `-domain` (measured 2026-11-20/21)
+
+`site:join.com Budapest developer` returned lever.co, indeed and profession.hu hits;
+`site:*.breezy.hr …` returned twine.net and clutch.co; `-jooble -indeed -profession` still returned
+indeed and profession pages. Do not build a query around those operators and do not count on them
+to filter — phrase queries as plain words and expect aggregator noise in every result list.
 
 ## Rotate your queries — do not default to the obvious one
 
@@ -37,8 +71,8 @@ The easy hits from any one query dry up fast. Rotate across all three buckets be
 default to the same "fejlesztő"/"developer" search every run just because it is the first one that
 comes to mind. Pick a different combination each run than the obvious one.
 
-**Use at least one query from EACH of the three buckets, and keep platform queries to at most half
-your total.** The platform bucket is the most tempting — `site:join.com`, `site:*.recruitee.com` and
+**After the leads, use the remaining searches mostly on the role and sector buckets; the platform
+bucket gets at most one.** The platform bucket is the most tempting — `site:join.com`, `site:*.recruitee.com` and
 friends return long clean result lists — and it is also the most exhausted, because `ats-crawl` and
 months of prior runs have already harvested those boards. A platform-only pass therefore returns
 almost entirely already-tracked companies (confirmed 2026-09-02 — see INCIDENTS.md § Query-bucket
@@ -54,13 +88,12 @@ adatelemző/data analyst, mobilfejlesztő, beágyazott szoftverfejlesztő/embedd
 Deliberately NOT in scope — do not search for these even though they are IT-adjacent: IT
 support/helpdesk/ügyfélszolgálati technikus, IT projektasszisztens.
 
-Query shape: `"<role> gyakornok saját karrier oldal"`,
-`"junior/medior <role> karrier oldal -jooble -indeed -profession -linkedin"`.
+Query shape: `"<role> gyakornok saját karrier oldal"`, `"<role> karrier oldal Budapest cég"`
+(no `-domain` exclusions — they are ignored).
 
-**By platform** — `join.com` and `*.breezy.hr` have repeatedly turned out to be plain
-server-rendered and are still yours to search directly: `site:join.com`, `site:*.breezy.hr` — each
-combined with "Budapest" or "Hungary" plus an IT role word, for small companies (under ~20 open
-roles).
+**By platform** — `join.com` and `*.breezy.hr` boards are plain server-rendered, but since the
+search tool ignores `site:` (see above), query them as words instead: `"join.com" Budapest <role>`,
+`"breezy.hr" Hungary <role>` — and spend at most ONE search on this bucket per run.
 
 **Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, Personio, BambooHR and Teamtailor are
 deliberately NOT in this bucket** — the board harvests all eight itself now (Greenhouse/Lever/Ashby/
@@ -295,6 +328,8 @@ The content is a JSON object, not a bare array:
   "checkedAgainst": 2315,
   "droppedAsKnown": 12,
   "droppedAsExcluded": 3,
+  "leadsUsed": 4,
+  "leadsRejected": [],
   "inProgress": true
 }
 ```
@@ -338,6 +373,8 @@ One held only in your head does not.
   "checkedAgainst": <how many lines you loaded from knownDomainsFile — 0 means you did NOT de-duplicate>,
   "droppedAsKnown": <count of hits discarded because the FULL tenant identity was already tracked>,
   "droppedAsExcluded": <count discarded against the exclusion list or broken platforms>,
+  "leadsUsed": <how many leadsFile entries you worked through>,
+  "leadsRejected": [ { "company": "<lead company>", "slug": "<short id>", "domain": "<real host or empty>", "reason": "<e.g. only posts via LinkedIn — no own career page>" } ],
   "note": "<optional: one line — stopped early on turns, a platform that blocked you, anything the orchestrator should know. Empty is fine.>"
 }
 ```
