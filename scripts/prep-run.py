@@ -138,6 +138,14 @@ def main():
     plan["knownDomainsFile"] = os.path.abspath(a.known_domains)
     plan["knownDomainsLines"] = len(lines)
 
+    # 2026-11-21: cég-jelöltek a saját aggregátor-soraink alapján (server `companyLeads`) —
+    # company-discovery ELŐSZÖR ezeket dolgozza fel, keresőmotor-zaj nélkül.
+    leads = (reg.get("companyLeads") or {}).get("leads") or []
+    leads_path = os.path.join(a.run_dir, "company-leads.json")
+    lib.write_json(leads_path, leads)
+    plan["companyLeadsFile"] = os.path.abspath(leads_path)
+    plan["companyLeadsCount"] = len(leads)
+
     plan_path = os.path.join(a.run_dir, "plan.json")
     lib.write_json(plan_path, plan)
 
@@ -149,6 +157,7 @@ def main():
     print("skipped (permanently rejected, still in sites): %d" % len(plan["skippedPermanentlyRejected"]))
     print("ats-crawl sites to retire once under `rejected`: %d" % len(plan["atsCrawlToRetire"]))
     print("known-domains: %d lines -> %s" % (len(lines), plan["knownDomainsFile"]))
+    print("company leads: %d -> %s" % (len(leads), plan["companyLeadsFile"]))
     for d in plan["due"]:
         print("  due  %-28s stored=%-3d last=%s" % (d["slug"], d["storedCount"],
                                                    (d["lastChecked"] or "")[:10]))

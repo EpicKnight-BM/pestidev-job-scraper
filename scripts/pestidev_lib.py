@@ -260,14 +260,43 @@ def build_known_domains(registry):
     return sorted(lines), stats
 
 
+def _norm_label(text):
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def company_labels(candidate):
+    """The bare company names a URL/domain implies: `marshmallow.com` / `careers.marshmallow.com`
+    -> `marshmallow`; `jobs.ashbyhq.com/marshmallow` -> `marshmallow`; `ltg.breezy.hr` -> `ltg`."""
+    out = []
+    for ident in identities(candidate):
+        if "/" in ident:
+            out.append(ident.rsplit("/", 1)[-1])
+        elif shared_suffix(ident):
+            out.append(ident.split(".", 1)[0])
+        else:
+            out.append(registrable(ident).split(".", 1)[0])
+    return [l for l in (_norm_label(x) for x in out) if len(l) >= 4]
+
+
 def check_known(candidate, known_lines):
-    """Return the first identity of `candidate` found in `known_lines` (a set), or None."""
+    """Return the first identity of `candidate` found in `known_lines` (a set), or None.
+
+    2026-11-21: also matches a slug-only line (a `permanentlyRejected` record whose `domain` was
+    never a host — 244 of 308 records after the 2026-09-10 migration, e.g. `marshmallow`) against
+    the company label of the candidate's domain, so those companies stop coming back as "NEW"."""
     for ident in identities(candidate):
         if ident in known_lines:
             return ident
     raw = (candidate or "").strip().lower()
     if raw in known_lines:
         return raw
+    slug_lines = {}
+    for ln in known_lines:
+        if "." not in ln and "/" not in ln:
+            slug_lines.setdefault(_norm_label(ln), ln)
+    for label in company_labels(candidate):
+        if label in slug_lines:
+            return slug_lines[label]
     return None
 
 
