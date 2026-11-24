@@ -42,6 +42,7 @@ import pestidev_lib as lib  # noqa: E402
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 TRACKING = re.compile(r"^(utm_|gclid|fbclid|ref$|source$|src$|domain$|lang$|locale$|page$|_ga)", re.I)
 LINK_RE = re.compile(r"""(?:href|src|data-href|data-url)\s*=\s*["']([^"'#][^"']*)["']|<loc>\s*([^<\s]+)\s*</loc>|"(https?://[^"\s]+)"|'(https?://[^'\s]+)'""", re.I)
+TEMPLATE_RE = re.compile(r"\{\{|\{%|\$\{|<%|%7B%7B|%7B%25", re.I)
 HASH_TAIL = re.compile(r"-([a-z0-9]{3,8})$")
 MIN_STORED = 3          # fewer stored URLs than this: no reliable pattern -> agent
 MIN_OVERLAP = 0.6       # share of stored URLs that must still be found for "confident"
@@ -118,6 +119,8 @@ def check_site(entry, run_dir):
     for m in LINK_RE.finditer(body):
         raw = next(g for g in m.groups() if g)
         raw = raw.replace("&amp;", "&").replace("\\/", "/")
+        if TEMPLATE_RE.search(raw):   # client-side template placeholders, not URLs (cegmenedzser 11-22)
+            continue
         absu = urljoin(url, raw)
         p = urlparse(absu)
         h = (p.hostname or "").lower().removeprefix("www.")
