@@ -411,7 +411,12 @@ Verify by reading the ACTUAL detail page, never just a title or a search snippet
    the posting CLEARLY and unambiguously ties the role to one or more specific other Hungarian
    cities with nothing suggesting Budapest is also an option (no "Budapest" among multiple listed
    offices, no remote/home-office/countrywide language). Concrete reject: karrier.4iggroup.hu's
-   "Szeged - Hálózat üzemeltető" — URL and posting both name Szeged only. A one-word location LABEL
+   "Szeged - Hálózat üzemeltető" — URL and posting both name Szeged only. **A city in a structured
+   location field is a clear statement even with the country after it** — Oracle HCM / Workday /
+   SuccessFactors rows like "DEBRECEN, HAJDÚ BIHAR, Hungary" or "Debrecen, Hungary" are Debrecen,
+   not "generic Magyarország": reject them (2026-11-24 miss: two Emerson Debrecen roles were
+   submitted). Only remote/home-office language or a Budapest office in the same posting keeps such a
+   role. A one-word location LABEL
    like "Countryside"/"Vidék" (seen on some 4iG/Rheinmetall postings, distinct from a "Budapest"
    label on their others) is exactly this kind of clear reject even with no city named — the label
    is the site's own Budapest/not-Budapest classification, trust it. If location is NOT clearly
@@ -520,7 +525,9 @@ no fit TODAY is `no_fit`, not a permanent rejection.
 `bot_blocked` (HTTP 403/429, a captcha or "verification" wall) and `js_rendered` (a client-side
 shell with no posting links, sitemap or JSON endpoint you could find) are for a listing you cannot
 read TODAY on a site that is not structurally dead — both back the site off 30 days instead of
-re-fetching it every week. Never try to script past a bot-check; record it and stop.
+re-fetching it every week. Never try to script past a bot-check; record it and stop — and STILL
+write the result file with that status: a blocked site with no result file is never registered, so
+discovery offers the same company again (2026-11-23/24: McKinsey came back twice).
 
 Do not exceed `budgetRemaining` findings. If you hit the cap, say so in `note` and still report the
 honest `postingsFound` count.

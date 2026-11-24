@@ -48,8 +48,13 @@ cannot steer (see the WebSearch warning below). Work them BEFORE any bucket quer
      apart. Every such search counts toward your 12-search cap.
    - Run `known-domains.py check` on what you found, exactly as for any other hit. KNOWN → drop it
      (`droppedAsKnown`). On an `ats-crawl` host → drop it (`droppedAsExcluded`).
-   - A real own career page / own ATS tenant → return it as a candidate with
-     `foundVia: "lead:<sources joined by +>"` and the page as `hintUrl`.
+   - A real own career page / own ATS tenant → **probe it once before returning it** (no search
+     cost): `timeout 30 curl -sS -L --max-time 25 -A "Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0" -o /tmp/probe.html -w "%{http_code}" "<hintUrl>"; echo " exit=$?"; grep -m1 -ioE "just a moment|access denied|one moment, please|captcha" /tmp/probe.html`.
+     HTTP 403/429, curl exit 52 / 56 / 92, or one of those wall phrases → do NOT return it; put it in
+     `leadsRejected` with `reason: "bot_blocked: <what you saw>"` (2026-11-23/24: ZEISS, McKinsey,
+     Cushman & Wakefield, Intuitech and Quantum Machines each cost a site-processor dispatch for 0
+     postings). Otherwise return it as a candidate with `foundVia: "lead:<sources joined by +>"`
+     and the page as `hintUrl`.
    - **No own career page at all** (the company only posts through LinkedIn/profession/an agency,
      or the search finds nothing that is clearly theirs) → add it to `leadsRejected`
      (`{company, slug, domain, reason}`; `domain` only if you found a real one). The orchestrator
